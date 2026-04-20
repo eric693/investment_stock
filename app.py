@@ -14,22 +14,25 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# ─── Config ─────────────────────────────────────────────────────────────────
+# ─── Config ──────────────────────────────────────────────────────────────────
 LINE_TOKEN   = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_USER_ID = os.environ.get("LINE_USER_ID", "")
-AV_API_KEY   = os.environ.get("ALPHAVANTAGE_API_KEY", "")
+TD_API_KEY   = os.environ.get("TWELVEDATA_API_KEY", "")
 TW_TZ = pytz.timezone("Asia/Taipei")
-CACHE_DURATION = int(os.environ.get("CACHE_SECONDS", "14400"))  # 4-hour cache
 
-# Alpha Vantage: free tier = 25 calls/day, 5 calls/min
-# 4 symbols × 6 refreshes/day = 24 calls/day ✓
-AV_BASE = "https://www.alphavantage.co/query"
+# Free tier: 800 credits/day, 8 credits/min
+# Price:   4 symbols × 24 refreshes/day  =  96 calls/day ✓
+# History: 4 symbols × 2 refreshes/day   =   8 calls/day ✓
+PRICE_TTL = int(os.environ.get("PRICE_CACHE_SECONDS", "3600"))   # 1 hour
+HIST_TTL  = int(os.environ.get("HIST_CACHE_SECONDS",  "43200"))  # 12 hours
 
-SYMBOLS = {
-    "0050":    "0050.TW",
-    "QQQ":     "QQQ",
-    "00631L":  "00631L.TW",
-    "QLD":     "QLD",
+TD_BASE = "https://api.twelvedata.com"
+
+TD_SYMBOLS = {
+    "0050":   ("0050",   "TWSE"),
+    "QQQ":    ("QQQ",    "NASDAQ"),
+    "00631L": ("00631L", "TWSE"),
+    "QLD":    ("QLD",    "NASDAQ"),
 }
 SYMBOL_NAMES = {
     "0050":   "元大台灣50",
@@ -38,66 +41,92 @@ SYMBOL_NAMES = {
     "QLD":    "ProShares Ultra QQQ",
 }
 
-# ─── In-memory cache ─────────────────────────────────────────────────────────
-_cache: dict = {"data": None, "ts": 0.0, "refreshing": False}
+# ─── Cache ────────────────────────────────────────────────────────────────────
+_cache = {
+    "stocks":     {},
+    "histories":  {},
+    "hist_ts":    0.0,
+    "price_ts":   0.0,
+    "refreshing": False,
+}
 alert_history: list = []
 
 
-# ─── Data helpers ─────────────────────────────────────────────────────────────
-def _fetch(symbol: str) -> pd.DataFrame | None:
-    if not AV_API_KEY:
-        logger.error("ALPHAVANTAGE_API_KEY not set")
+# ─── Twelve Data helpers ──────────────────────────────────────────────────────
+def _td_get(endpoint: str, params: dict) -> dict | None:
+    if not TD_API_KEY:
+        logger.error("TWELVEDATA_API_KEY not set")
         return None
     try:
-        resp = requests.get(AV_BASE, params={
-            "function":   "TIME_SERIES_DAILY_ADJUSTED",
-            "symbol":     symbol,
-            "outputsize": "full",
-            "apikey":     AV_API_KEY,
-        }, timeout=30)
+        params["apikey"] = TD_API_KEY
+        resp = requests.get(f"{TD_BASE}/{endpoint}", params=params, timeout=30)
         data = resp.json()
-
-        ts = data.get("Time Series (Daily)")
-        if not ts:
-            note = data.get("Note") or data.get("Information") or data.get("Error Message") or "unknown"
-            logger.error("AV no data for %s: %s", symbol, note)
+        if data.get("status") == "error" or "code" in data:
+            logger.error("TD error [%s]: %s", endpoint, data.get("message", data))
             return None
-
-        df = pd.DataFrame.from_dict(ts, orient="index")
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
-        df["Close"] = df["5. adjusted close"].astype(float)
-        df["MA200"] = df["Close"].rolling(200).mean()
-        df["MA50"]  = df["Close"].rolling(50).mean()
-        logger.info("Fetched %s (%d rows)", symbol, len(df))
-        return df
+        return data
     except Exception as exc:
-        logger.error("Fetch error %s: %s", symbol, exc)
+        logger.error("TD request error [%s]: %s", endpoint, exc)
         return None
 
 
-def _build_stock_entry(name: str, hist: pd.DataFrame) -> dict:
-    close   = hist["Close"]
-    current = float(close.iloc[-1])
-    prev    = float(close.iloc[-2])
-    ma200   = float(hist["MA200"].iloc[-1]) if not pd.isna(hist["MA200"].iloc[-1]) else None
-    ma50    = float(hist["MA50"].iloc[-1])  if not pd.isna(hist["MA50"].iloc[-1])  else None
+def _fetch_history(sym: str, exchange: str) -> pd.DataFrame | None:
+    data = _td_get("time_series", {
+        "symbol": sym, "exchange": exchange,
+        "interval": "1day", "outputsize": "500",
+    })
+    if not data:
+        return None
+    values = data.get("values", [])
+    if not values:
+        logger.error("TD no values for %s", sym)
+        return None
+    df = pd.DataFrame(values)
+    df.index = pd.to_datetime(df["datetime"])
+    df = df.sort_index()
+    df["Close"] = df["close"].astype(float)
+    df["MA200"]  = df["Close"].rolling(200).mean()
+    df["MA50"]   = df["Close"].rolling(50).mean()
+    logger.info("History fetched %s (%d rows)", sym, len(df))
+    return df
 
-    daily_chg       = (current - prev) / prev * 100
-    pct_from_ma200  = (current - ma200) / ma200 * 100 if ma200 else None
 
-    # Last 3 sessions vs MA200
+def _fetch_quote(sym: str, exchange: str) -> dict | None:
+    data = _td_get("quote", {"symbol": sym, "exchange": exchange})
+    if not data:
+        return None
+    try:
+        return {
+            "price":          float(data["close"]),
+            "prev_close":     float(data["previous_close"]),
+            "daily_change":   float(data["percent_change"]),
+            "is_market_open": data.get("is_market_open", False),
+        }
+    except (KeyError, ValueError) as exc:
+        logger.error("TD quote parse %s: %s", sym, exc)
+        return None
+
+
+# ─── Build stock entry ────────────────────────────────────────────────────────
+def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
+    current   = quote["price"]
+    prev      = quote["prev_close"]
+    daily_chg = quote["daily_change"]
+
+    ma200 = float(hist["MA200"].iloc[-1]) if not pd.isna(hist["MA200"].iloc[-1]) else None
+    ma50  = float(hist["MA50"].iloc[-1])  if not pd.isna(hist["MA50"].iloc[-1])  else None
+    pct_from_ma200 = (current - ma200) / ma200 * 100 if ma200 else None
+
     last3: list[float] = []
     for i in range(-3, 0):
         try:
-            p = float(close.iloc[i])
+            p = float(hist["Close"].iloc[i])
             m = float(hist["MA200"].iloc[i])
             if not np.isnan(m):
                 last3.append((p - m) / m * 100)
         except Exception:
             pass
 
-    # Chart: last ~252 trading days
     ch = hist.tail(252)
     chart = {
         "dates":  ch.index.strftime("%Y-%m-%d").tolist(),
@@ -120,48 +149,59 @@ def _build_stock_entry(name: str, hist: pd.DataFrame) -> dict:
     }
 
 
-def get_dashboard_data() -> dict:
-    stocks = {}
-    for i, (name, sym) in enumerate(SYMBOLS.items()):
-        if i > 0:
-            time.sleep(13)  # AV free: 5 calls/min → 1 call per 12s
-        hist = _fetch(sym)
-        if hist is not None and len(hist) >= 5:
-            stocks[name] = _build_stock_entry(name, hist)
-    return stocks
+# ─── Refresh logic ────────────────────────────────────────────────────────────
+def _do_refresh(refresh_hist: bool, refresh_price: bool):
+    if refresh_hist:
+        logger.info("Refreshing histories…")
+        for i, (name, (sym, exch)) in enumerate(TD_SYMBOLS.items()):
+            if i > 0:
+                time.sleep(8)  # stay under 8 calls/min
+            hist = _fetch_history(sym, exch)
+            if hist is not None:
+                _cache["histories"][name] = hist
+        _cache["hist_ts"] = time.time()
+
+    if refresh_price:
+        logger.info("Refreshing prices…")
+        for i, (name, (sym, exch)) in enumerate(TD_SYMBOLS.items()):
+            if i > 0:
+                time.sleep(8)
+            quote = _fetch_quote(sym, exch)
+            hist  = _cache["histories"].get(name)
+            if quote and hist is not None:
+                _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
+        _cache["price_ts"] = time.time()
 
 
-def _background_refresh():
+def _background_refresh(hist: bool = False, price: bool = True):
     if _cache["refreshing"]:
         return
     _cache["refreshing"] = True
     try:
-        logger.info("Background refresh started…")
-        new_data = get_dashboard_data()
-        if new_data:
-            _cache["data"] = new_data
-            _cache["ts"]   = time.time()
-            logger.info("Background refresh done.")
+        _do_refresh(refresh_hist=hist, refresh_price=price)
+        logger.info("Refresh done (hist=%s price=%s).", hist, price)
     except Exception as exc:
-        logger.error("Background refresh error: %s", exc)
+        logger.error("Refresh error: %s", exc)
     finally:
         _cache["refreshing"] = False
 
 
 def cached_data() -> dict:
-    now = time.time()
-    age = now - _cache["ts"]
+    now        = time.time()
+    need_hist  = not _cache["histories"] or (now - _cache["hist_ts"])  > HIST_TTL
+    need_price = not _cache["stocks"]    or (now - _cache["price_ts"]) > PRICE_TTL
 
-    if _cache["data"] is None:
-        # Cold start — must block
-        logger.info("Cold start: fetching stock data…")
-        _background_refresh()
-    elif age > CACHE_DURATION and not _cache["refreshing"]:
-        # Stale — serve old data, refresh in background
-        logger.info("Cache stale (%.0fs), triggering background refresh…", age)
-        threading.Thread(target=_background_refresh, daemon=True).start()
+    if not _cache["stocks"]:
+        logger.info("Cold start…")
+        _background_refresh(hist=True, price=True)
+    elif (need_hist or need_price) and not _cache["refreshing"]:
+        threading.Thread(
+            target=_background_refresh,
+            kwargs={"hist": need_hist, "price": need_price},
+            daemon=True,
+        ).start()
 
-    return _cache["data"] or {}
+    return _cache["stocks"]
 
 
 # ─── SOP logic ────────────────────────────────────────────────────────────────
@@ -177,7 +217,6 @@ def compute_sop(stocks: dict) -> dict:
     ma200 = tw.get("ma200") or 0.0
     price = tw.get("price") or 0.0
 
-    # ─ SOP 04 smile levels ─
     smile_levels = []
     for t in [-8, -10, -15, -20, -25, -30]:
         tp = ma200 * (1 + t / 100) if ma200 else 0
@@ -187,7 +226,6 @@ def compute_sop(stocks: dict) -> dict:
             "triggered": price <= tp if tp else False,
         })
 
-    # ─ Status helpers ─
     def s02():
         if pqqq <= -10: return "alert"
         if pqqq <= -5:  return "watch"
@@ -218,7 +256,7 @@ def compute_sop(stocks: dict) -> dict:
         },
         "sop02": {
             "name": "雙核雷達", "status": s02(),
-            "qqq_pct":   round(pqqq, 2),
+            "qqq_pct":    round(pqqq, 2),
             "tw50_above": above,
             "desc_rule": "台股看0050年線；QQQ跌破年線-10% → 正2強制清倉",
             "desc_val":  f"QQQ 年線偏離：{pqqq:+.2f}%",
@@ -323,7 +361,6 @@ def api_dashboard():
         sop    = compute_sop(stocks)
         alerts = check_alerts(stocks, sop)
 
-        # Persist new critical alerts
         for a in alerts:
             if a not in alert_history:
                 alert_history.insert(0, a)
@@ -336,7 +373,8 @@ def api_dashboard():
             "alerts":        alerts,
             "alert_history": alert_history[:20],
             "updated_at":    datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-            "cache_age":     int(time.time() - _cache["ts"]),
+            "price_age":     int(time.time() - _cache["price_ts"]),
+            "hist_age":      int(time.time() - _cache["hist_ts"]),
         })
     except Exception as exc:
         logger.exception("Dashboard error")
@@ -353,18 +391,28 @@ def api_notify():
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    _cache["ts"] = 0.0
-    threading.Thread(target=_background_refresh, daemon=True).start()
-    return jsonify({"ok": True, "msg": "Refresh triggered in background"})
+    _cache["price_ts"] = 0.0
+    _cache["hist_ts"]  = 0.0
+    threading.Thread(
+        target=_background_refresh,
+        kwargs={"hist": True, "price": True},
+        daemon=True,
+    ).start()
+    return jsonify({"ok": True, "msg": "Full refresh triggered in background"})
 
 
 @app.route("/webhook", methods=["POST"])
 def line_webhook():
-    """LINE Bot webhook endpoint (register in LINE Developers console)."""
-    body      = request.get_data(as_text=True)
-    signature = request.headers.get("X-Line-Signature", "")
-    # Minimal echo: reply with SOP status when user messages
-    logger.info("LINE webhook received")
+    body   = request.get_data(as_text=True)
+    events = {}
+    try:
+        events = request.get_json(silent=True) or {}
+    except Exception:
+        pass
+    for event in events.get("events", []):
+        uid = event.get("source", {}).get("userId")
+        if uid:
+            logger.info("LINE userId: %s", uid)
     return "OK", 200
 
 
