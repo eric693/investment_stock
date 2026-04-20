@@ -38,7 +38,7 @@ TW_SYMBOLS = {
 # US stocks — Twelve Data (free plan supports US exchanges)
 US_SYMBOLS = {
     "QQQ": ("QQQ", "NASDAQ"),
-    "QLD": ("QLD", "NYSE Arca"),
+    "QLD": ("QLD", ""),       # let TD auto-detect exchange
 }
 SYMBOL_NAMES = {
     "0050":   "元大台灣50",
@@ -100,35 +100,50 @@ def _fetch_tw_quotes() -> dict:
         return {}
 
 
-def _fetch_av_history(av_symbol: str) -> pd.DataFrame | None:
-    """Fetch daily history via Alpha Vantage for MA calculation."""
-    if not AV_API_KEY:
-        logger.error("ALPHAVANTAGE_API_KEY not set")
+def _fetch_twse_history(stock_no: str, months: int = 14) -> pd.DataFrame | None:
+    """Fetch TW stock history from TWSE official monthly API (free, no auth)."""
+    from datetime import date
+    rows = []
+    today = date.today()
+    for i in range(months):
+        m = today.month - i
+        y = today.year
+        while m <= 0:
+            m += 12
+            y -= 1
+        try:
+            resp = requests.get(
+                "https://www.twse.com.tw/exchangeReport/STOCK_DAY",
+                params={"response": "json", "date": f"{y}{m:02d}01", "stockNo": stock_no},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=15,
+            )
+            data = resp.json()
+            if data.get("stat") != "OK":
+                continue
+            for row in data.get("data", []):
+                close_str = row[6].replace(",", "")
+                if close_str in ("--", ""):
+                    continue
+                parts = row[0].split("/")
+                rows.append({
+                    "date":  f"{int(parts[0]) + 1911}-{parts[1]}-{parts[2]}",
+                    "Close": float(close_str),
+                })
+            time.sleep(0.3)
+        except Exception as exc:
+            logger.warning("TWSE history %s %s: %s", stock_no, f"{y}{m:02d}", exc)
+
+    if not rows:
+        logger.error("TWSE no history for %s", stock_no)
         return None
-    try:
-        resp = requests.get(AV_BASE, params={
-            "function":   "TIME_SERIES_DAILY",
-            "symbol":     av_symbol,
-            "outputsize": "full",
-            "apikey":     AV_API_KEY,
-        }, timeout=30)
-        data = resp.json()
-        ts = data.get("Time Series (Daily)")
-        if not ts:
-            note = data.get("Note") or data.get("Information") or data.get("Error Message") or "unknown"
-            logger.error("AV no data for %s: %s", av_symbol, note)
-            return None
-        df = pd.DataFrame.from_dict(ts, orient="index")
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
-        df["Close"] = df["4. close"].astype(float)
-        df["MA200"]  = df["Close"].rolling(200).mean()
-        df["MA50"]   = df["Close"].rolling(50).mean()
-        logger.info("AV history fetched %s (%d rows)", av_symbol, len(df))
-        return df
-    except Exception as exc:
-        logger.error("AV fetch error %s: %s", av_symbol, exc)
-        return None
+    df = pd.DataFrame(rows)
+    df.index = pd.to_datetime(df["date"])
+    df = df.sort_index()
+    df["MA200"] = df["Close"].rolling(200).mean()
+    df["MA50"]  = df["Close"].rolling(50).mean()
+    logger.info("TWSE history %s: %d rows", stock_no, len(df))
+    return df
 
 
 # ─── US stock helpers (Twelve Data) ──────────────────────────────────────────
@@ -150,10 +165,10 @@ def _td_get(endpoint: str, params: dict) -> dict | None:
 
 
 def _fetch_td_history(sym: str, exchange: str) -> pd.DataFrame | None:
-    data = _td_get("time_series", {
-        "symbol": sym, "exchange": exchange,
-        "interval": "1day", "outputsize": "500",
-    })
+    params = {"symbol": sym, "interval": "1day", "outputsize": "500"}
+    if exchange:
+        params["exchange"] = exchange
+    data = _td_get("time_series", params)
     if not data:
         return None
     values = data.get("values", [])
@@ -170,7 +185,10 @@ def _fetch_td_history(sym: str, exchange: str) -> pd.DataFrame | None:
 
 
 def _fetch_td_quote(sym: str, exchange: str) -> dict | None:
-    data = _td_get("quote", {"symbol": sym, "exchange": exchange})
+    params = {"symbol": sym}
+    if exchange:
+        params["exchange"] = exchange
+    data = _td_get("quote", params)
     if not data:
         return None
     try:
@@ -230,11 +248,10 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
 # ─── Refresh logic ────────────────────────────────────────────────────────────
 def _do_refresh(refresh_hist: bool, refresh_price: bool):
     if refresh_hist:
-        logger.info("Refreshing TW histories (Alpha Vantage)…")
-        for i, (name, av_sym) in enumerate(TW_SYMBOLS.items()):
-            if i > 0:
-                time.sleep(13)  # AV free: 5 calls/min
-            hist = _fetch_av_history(av_sym)
+        logger.info("Refreshing TW histories (TWSE monthly API)…")
+        for name, av_sym in TW_SYMBOLS.items():
+            stock_no = av_sym.replace(".TW", "")
+            hist = _fetch_twse_history(stock_no)
             if hist is not None:
                 _cache["histories"][name] = hist
 
