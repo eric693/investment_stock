@@ -1,11 +1,9 @@
 import os
 import time
-import random
 import logging
 import threading
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
@@ -19,20 +17,19 @@ app = Flask(__name__)
 # ─── Config ─────────────────────────────────────────────────────────────────
 LINE_TOKEN   = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_USER_ID = os.environ.get("LINE_USER_ID", "")
+AV_API_KEY   = os.environ.get("ALPHAVANTAGE_API_KEY", "")
 TW_TZ = pytz.timezone("Asia/Taipei")
-CACHE_DURATION = int(os.environ.get("CACHE_SECONDS", "1800"))  # 30-min cache
+CACHE_DURATION = int(os.environ.get("CACHE_SECONDS", "14400"))  # 4-hour cache
 
-_HEADERS_POOL = [
-    {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
-    {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"},
-    {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"},
-]
+# Alpha Vantage: free tier = 25 calls/day, 5 calls/min
+# 4 symbols × 6 refreshes/day = 24 calls/day ✓
+AV_BASE = "https://www.alphavantage.co/query"
 
 SYMBOLS = {
     "0050":    "0050.TW",
     "QQQ":     "QQQ",
-    "00631L":  "00631L.TW",   # 台灣50正2
-    "QLD":     "QLD",          # QQQ 2x
+    "00631L":  "00631L.TW",
+    "QLD":     "QLD",
 }
 SYMBOL_NAMES = {
     "0050":   "元大台灣50",
@@ -47,28 +44,36 @@ alert_history: list = []
 
 
 # ─── Data helpers ─────────────────────────────────────────────────────────────
-def _fetch(symbol: str, retries: int = 4) -> pd.DataFrame | None:
-    for attempt in range(retries):
-        try:
-            session = requests.Session()
-            session.headers.update(random.choice(_HEADERS_POOL))
-            ticker = yf.Ticker(symbol, session=session)
-            hist = ticker.history(period="2y")
-            if not hist.empty:
-                hist["MA200"] = hist["Close"].rolling(200).mean()
-                hist["MA50"]  = hist["Close"].rolling(50).mean()
-                return hist
-        except Exception as exc:
-            msg = str(exc)
-            if "Too Many Requests" in msg or "Rate" in msg:
-                wait = 2 ** attempt + random.uniform(1, 3)
-                logger.warning("Rate limited %s (attempt %d), retry in %.1fs", symbol, attempt + 1, wait)
-                time.sleep(wait)
-            else:
-                logger.error("Fetch error %s: %s", symbol, exc)
-                return None
-    logger.error("Fetch failed %s after %d retries", symbol, retries)
-    return None
+def _fetch(symbol: str) -> pd.DataFrame | None:
+    if not AV_API_KEY:
+        logger.error("ALPHAVANTAGE_API_KEY not set")
+        return None
+    try:
+        resp = requests.get(AV_BASE, params={
+            "function":   "TIME_SERIES_DAILY_ADJUSTED",
+            "symbol":     symbol,
+            "outputsize": "full",
+            "apikey":     AV_API_KEY,
+        }, timeout=30)
+        data = resp.json()
+
+        ts = data.get("Time Series (Daily)")
+        if not ts:
+            note = data.get("Note") or data.get("Information") or data.get("Error Message") or "unknown"
+            logger.error("AV no data for %s: %s", symbol, note)
+            return None
+
+        df = pd.DataFrame.from_dict(ts, orient="index")
+        df.index = pd.to_datetime(df.index)
+        df = df.sort_index()
+        df["Close"] = df["5. adjusted close"].astype(float)
+        df["MA200"] = df["Close"].rolling(200).mean()
+        df["MA50"]  = df["Close"].rolling(50).mean()
+        logger.info("Fetched %s (%d rows)", symbol, len(df))
+        return df
+    except Exception as exc:
+        logger.error("Fetch error %s: %s", symbol, exc)
+        return None
 
 
 def _build_stock_entry(name: str, hist: pd.DataFrame) -> dict:
@@ -119,7 +124,7 @@ def get_dashboard_data() -> dict:
     stocks = {}
     for i, (name, sym) in enumerate(SYMBOLS.items()):
         if i > 0:
-            time.sleep(random.uniform(1.5, 3.0))  # stagger requests
+            time.sleep(13)  # AV free: 5 calls/min → 1 call per 12s
         hist = _fetch(sym)
         if hist is not None and len(hist) >= 5:
             stocks[name] = _build_stock_entry(name, hist)
