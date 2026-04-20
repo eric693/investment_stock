@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: stock-monitor
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: GAS_WEBHOOK_URL
+        value: "https://script.google.com/macros/s/AKfycbzWRoQA_a3ca_IirluqHY1d63Zo3yvaXaKIu0DY2Fhx3nsLvdGmOw_Tr2NCuuqlclPi/exec"
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false   # set manually in Render dashboard
+      - key: LINE_USER_ID
+        sync: false   # your LINE user / group ID
+      - key: CACHE_SECONDS
+        value: "300"
+    healthCheckPath: /

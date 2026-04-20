@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Monitor — 台美股終極SOP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* ─── Variables ────────────────────────────────────────────────────────── */
+:root {
+  --bg0: #080c14;
+  --bg1: #0d1117;
+  --bg2: #161b22;
+  --bg3: #1c2230;
+  --border: #21283a;
+  --border2: #2d3748;
+  --txt1: #e2e8f4;
+  --txt2: #8896a9;
+  --txt3: #55657a;
+  --green: #22c55e;
+  --green-dim: rgba(34,197,94,.12);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,.12);
+  --yellow: #eab308;
+  --yellow-dim: rgba(234,179,8,.12);
+  --blue: #3b82f6;
+  --blue-dim: rgba(59,130,246,.12);
+  --cyan: #06b6d4;
+  --accent: #7c3aed;
+  --accent2: #a855f7;
+}
+
+/* ─── Reset ───────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg0);
+  color: var(--txt1);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+button { cursor: pointer; font-family: inherit; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg1); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* ─── Topbar ──────────────────────────────────────────────────────────── */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; height: 56px;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.topbar-brand {
+  display: flex; align-items: center; gap: 12px;
+}
+.brand-mark {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--cyan) 100%);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 800; color: #fff; letter-spacing: -0.5px;
+}
+.brand-title { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
+.brand-sub { font-size: 11px; color: var(--txt3); font-weight: 400; margin-top: 1px; }
+
+.topbar-meta {
+  display: flex; align-items: center; gap: 20px;
+}
+.meta-pill {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 20px; font-size: 11px; color: var(--txt2);
+}
+.pulse-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; } 50% { opacity: 0.3; }
+}
+
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 7px;
+  font-size: 12px; font-weight: 500;
+  transition: all .15s; border: 1px solid transparent;
+}
+.btn-ghost {
+  background: var(--bg2); border-color: var(--border); color: var(--txt1);
+}
+.btn-ghost:hover { background: var(--bg3); }
+.btn-primary {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.btn-primary:hover { background: var(--accent2); }
+.btn-icon { width: 14px; height: 14px; opacity: .7; }
+
+/* ─── Page layout ─────────────────────────────────────────────────────── */
+.page { padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+
+/* ─── Stock grid ──────────────────────────────────────────────────────── */
+.stock-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.scard {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  position: relative; overflow: hidden;
+  transition: border-color .2s;
+}
+.scard:hover { border-color: var(--border2); }
+.scard::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  border-top: 2px solid transparent;
+}
+.scard.up::after   { border-top-color: var(--green); }
+.scard.down::after { border-top-color: var(--red); }
+.scard.flat::after { border-top-color: var(--border2); }
+
+.scard-top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 12px;
+}
+.scard-sym { font-size: 17px; font-weight: 800; letter-spacing: -0.5px; }
+.scard-name { font-size: 10px; color: var(--txt3); margin-top: 2px; font-weight: 400; }
+.scard-tag {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+  padding: 2px 7px; border-radius: 10px;
+}
+.tag-above { background: var(--green-dim); color: var(--green); }
+.tag-below { background: var(--red-dim); color: var(--red); }
+
+.scard-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px; font-weight: 700; letter-spacing: -1px;
+  line-height: 1; margin-bottom: 6px;
+}
+.scard-chg {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; font-weight: 600;
+}
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+.neu { color: var(--txt2); }
+
+.scard-divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+.scard-metrics { display: flex; flex-direction: column; gap: 5px; }
+.metric-row {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.metric-lbl { font-size: 10px; color: var(--txt3); }
+.metric-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; font-weight: 600;
+}
+
+/* ─── Main content ────────────────────────────────────────────────────── */
+.content-row {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 18px;
+  align-items: start;
+}
+
+/* ─── Panel base ──────────────────────────────────────────────────────── */
+.panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-title { font-size: 13px; font-weight: 600; }
+.panel-body { padding: 16px 18px; }
+
+/* ─── Chart panel ─────────────────────────────────────────────────────── */
+.chart-tabs { display: flex; gap: 4px; }
+.ctab {
+  background: none; border: 1px solid var(--border);
+  color: var(--txt2); padding: 4px 12px; border-radius: 6px;
+  font-size: 11px; font-weight: 600; transition: all .15s;
+}
+.ctab.active {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.ctab:hover:not(.active) { background: var(--bg3); }
+
+.chart-wrap { padding: 16px 18px 0; height: 300px; position: relative; }
+.chart-legend {
+  display: flex; gap: 16px;
+  padding: 10px 18px 14px;
+}
+.leg-item { display: flex; align-items: center; gap: 6px; }
+.leg-line { width: 20px; height: 2px; border-radius: 1px; }
+.leg-label { font-size: 10px; color: var(--txt2); }
+
+/* ─── SOP panel ───────────────────────────────────────────────────────── */
+.sop-stack { display: flex; flex-direction: column; gap: 10px; }
+
+.sop-item {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.sop-item-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sop-num-title { display: flex; align-items: center; gap: 8px; }
+.sop-num {
+  font-size: 9px; font-weight: 800; color: var(--txt3);
+  letter-spacing: .5px;
+}
+.sop-name { font-size: 13px; font-weight: 700; }
+.badge {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .4px; padding: 2px 7px; border-radius: 10px;
+}
+.badge-normal  { background: var(--green-dim);  color: var(--green); }
+.badge-watch   { background: var(--yellow-dim); color: var(--yellow); }
+.badge-alert   { background: var(--red-dim);    color: var(--red); }
+.badge-active  { background: var(--blue-dim);   color: var(--blue); }
+.badge-standby { background: rgba(255,255,255,.05); color: var(--txt3); }
+
+.sop-item-bd { padding: 10px 14px; }
+.sop-rule { font-size: 10px; color: var(--txt3); margin-bottom: 5px; line-height: 1.4; }
+.sop-val  { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; }
+
+/* ─── Bottom row ──────────────────────────────────────────────────────── */
+.bottom-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+/* ─── Alert list ──────────────────────────────────────────────────────── */
+.alert-scroll { max-height: 220px; overflow-y: auto; }
+.alert-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.alert-row:last-child { border-bottom: none; }
+.adot {
+  width: 7px; height: 7px; border-radius: 50%;
+  margin-top: 5px; flex-shrink: 0;
+}
+.adot-crit { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+.adot-buy  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.adot-info { background: var(--blue);  }
+.alert-ttl { font-size: 12px; font-weight: 600; }
+.alert-msg { font-size: 10px; color: var(--txt2); margin-top: 2px; line-height: 1.4; }
+.alert-ts  { font-size: 9px;  color: var(--txt3); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.empty-box {
+  padding: 28px; text-align: center;
+  color: var(--txt3); font-size: 11px;
+}
+
+/* ─── Smile detail ────────────────────────────────────────────────────── */
+.smile-header {
+  font-size: 11px; color: var(--txt2);
+  margin-bottom: 12px;
+}
+.smile-grid { display: flex; flex-direction: column; gap: 6px; }
+.smile-row { display: flex; align-items: center; gap: 10px; }
+.smile-thr {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  width: 34px; text-align: right; color: var(--txt2);
+}
+.smile-track {
+  flex: 1; height: 5px;
+  background: var(--bg3); border-radius: 3px; overflow: hidden;
+}
+.smile-fill {
+  height: 100%; border-radius: 3px;
+  background: var(--border2);
+  transition: background .3s, width .4s;
+}
+.smile-fill.hit { background: var(--green); }
+.smile-price-lbl {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; color: var(--txt3); width: 52px;
+}
+.smile-state {
+  font-size: 9px; width: 36px; text-align: right; font-weight: 700;
+}
+.smile-foot {
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 10px; color: var(--txt3); line-height: 1.6;
+}
+
+/* ─── Spinner ─────────────────────────────────────────────────────────── */
+.sk { display: flex; justify-content: center; padding: 28px; }
+.spin {
+  width: 20px; height: 20px;
+  border: 2px solid var(--border); border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Toast ───────────────────────────────────────────────────────────── */
+.toast {
+  position: fixed; bottom: 20px; right: 20px; z-index: 999;
+  padding: 11px 16px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 9px; font-size: 12px; font-weight: 500;
+  transform: translateY(20px); opacity: 0;
+  transition: all .2s; pointer-events: none;
+}
+.toast.show {
+  transform: translateY(0); opacity: 1;
+}
+
+/* ─── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .stock-grid  { grid-template-columns: repeat(2, 1fr); }
+  .content-row { grid-template-columns: 1fr; }
+  .bottom-row  { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ─── Topbar ─────────────────────────────────────────────────────────────── -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <div class="brand-mark">SM</div>
+    <div>
+      <div class="brand-title">STOCK MONITOR</div>
+      <div class="brand-sub">台美股終極 SOP 監控系統</div>
+    </div>
+  </div>
+
+  <div class="topbar-meta">
+    <div class="meta-pill">
+      <div class="pulse-dot"></div>
+      <span id="clockDisplay">--:--:--</span>
+      &ensp;台北時間
+    </div>
+    <div class="meta-pill">
+      更新：<span id="updatedAt">載入中…</span>
+      &ensp;|&ensp;快取：<span id="cacheAge">-</span>s 前
+    </div>
+  </div>
+
+  <div class="topbar-actions">
+    <button class="btn btn-ghost" id="refreshBtn" onclick="forceRefresh()">
+      <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M13.7 2.3A7 7 0 1 0 14 8" stroke-linecap="round"/>
+        <path d="M14 2v4h-4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      重新整理
+    </button>
+    <button class="btn btn-primary" onclick="testNotify()">
+      <svg class="btn-icon" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 1a5 5 0 0 0-5 5v3l-1.5 2h13L13 9V6a5 5 0 0 0-5-5zm0 14a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2z"/>
+      </svg>
+      LINE 測試通知
+    </button>
+  </div>
+</header>
+
+<!-- ─── Page ──────────────────────────────────────────────────────────────── -->
+<div class="page">
+
+  <!-- Stock cards -->
+  <div class="stock-grid" id="stockGrid">
+    <div class="sk"><div class="spin"></div></div>
+  </div>
+
+  <!-- Chart + SOP -->
+  <div class="content-row">
+
+    <!-- Chart panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">收盤價 &amp; 移動平均線</span>
+        <div class="chart-tabs" id="chartTabs">
+          <button class="ctab active" data-sym="0050"   onclick="switchChart(this,'0050')">0050</button>
+          <button class="ctab"        data-sym="QQQ"    onclick="switchChart(this,'QQQ')">QQQ</button>
+          <button class="ctab"        data-sym="00631L" onclick="switchChart(this,'00631L')">00631L</button>
+          <button class="ctab"        data-sym="QLD"    onclick="switchChart(this,'QLD')">QLD</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
+      <div class="chart-legend">
+        <div class="leg-item">
+          <div class="leg-line" style="background:var(--cyan)"></div>
+          <span class="leg-label">收盤價</span>
+        </div>
+        <div class="leg-item">
+          <div class="leg-line" style="background:var(--yellow); border-top: 2px dashed var(--yellow); height:0;width:20px;"></div>
+          <span class="leg-label">200MA 年線</span>
+        </div>
+        <div class="leg-item">
+          <div class="leg-line" style="background:var(--red); opacity:.6"></div>
+          <span class="leg-label">50MA</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SOP stack -->
+    <div class="sop-stack" id="sopStack">
+      <div class="sk"><div class="spin"></div></div>
+    </div>
+  </div>
+
+  <!-- Bottom row -->
+  <div class="bottom-row">
+
+    <!-- Alert history -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">觸發紀錄</span>
+        <span id="alertBadge" style="font-size:10px;color:var(--txt3);">無警報</span>
+      </div>
+      <div class="alert-scroll" id="alertList">
+        <div class="empty-box">目前無觸發紀錄</div>
+      </div>
+    </div>
+
+    <!-- Smile layout -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">微笑佈局 — 0050 買點位置</span>
+      </div>
+      <div class="panel-body" id="smileDetail">
+        <div class="sk"><div class="spin"></div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ─── State ───────────────────────────────────────────────────────────────── */
+let chart     = null;
+let curSym    = '0050';
+let state     = null;   // last API response
+
+/* ─── Clock ───────────────────────────────────────────────────────────────── */
+function tickClock() {
+  document.getElementById('clockDisplay').textContent =
+    new Date().toLocaleTimeString('zh-TW', {hour12:false, timeZone:'Asia/Taipei'});
+}
+setInterval(tickClock, 1000); tickClock();
+
+/* ─── Utils ───────────────────────────────────────────────────────────────── */
+const f = (n, d=2) => n == null ? '-' : Number(n).toFixed(d);
+const fc = n => n == null ? '-' : (n>=0?'+':'')+Number(n).toFixed(2)+'%';
+const cls = n => n == null ? 'neu' : n>0?'pos':n<0?'neg':'neu';
+
+function toast(msg, ok=true) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.borderColor = ok ? 'var(--green)' : 'var(--red)';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+/* ─── Fetch ───────────────────────────────────────────────────────────────── */
+async function loadData() {
+  try {
+    const r = await fetch('/api/dashboard');
+    if (!r.ok) throw new Error(r.statusText);
+    state = await r.json();
+    render();
+  } catch(e) {
+    console.error(e);
+    toast('資料載入失敗', false);
+  }
+}
+
+async function forceRefresh() {
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  btn.textContent = '載入中…';
+  try {
+    await fetch('/api/refresh', {method:'POST'});
+    await loadData();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+      <path d="M13.7 2.3A7 7 0 1 0 14 8" stroke-linecap="round"/>
+      <path d="M14 2v4h-4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg> 重新整理`;
+  }
+}
+
+async function testNotify() {
+  try {
+    const r = await fetch('/api/notify', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message:'[測試] 台美股SOP監控系統正常運作，LINE通知設定成功！'})
+    });
+    const d = await r.json();
+    toast(d.ok ? 'LINE 通知已發送' : '發送失敗', d.ok);
+  } catch(e) { toast('發送失敗', false); }
+}
+
+/* ─── Render ──────────────────────────────────────────────────────────────── */
+function render() {
+  if (!state) return;
+  document.getElementById('updatedAt').textContent = state.updated_at || '-';
+  document.getElementById('cacheAge').textContent  = state.cache_age  || '-';
+
+  renderStockGrid(state.stocks);
+  renderSOP(state.sop);
+  renderAlerts(state.alerts, state.alert_history);
+  renderSmile(state.sop);
+  renderChart(curSym);
+}
+
+/* ── Stock grid ── */
+const NAMES = {
+  '0050':'元大台灣50', 'QQQ':'Invesco QQQ',
+  '00631L':'台灣50正2', 'QLD':'Ultra QQQ (2x)'
+};
+const ORDER = ['0050','QQQ','00631L','QLD'];
+
+function renderStockGrid(stocks) {
+  if (!stocks) return;
+  document.getElementById('stockGrid').innerHTML = ORDER.map(sym => {
+    const s = stocks[sym];
+    if (!s) return `<div class="scard flat"><div class="sk"><div class="spin"></div></div></div>`;
+    const dc = s.daily_change;
+    const cardCls = dc > 0 ? 'up' : dc < 0 ? 'down' : 'flat';
+    const tagCls  = s.above_ma200 ? 'tag-above' : 'tag-below';
+    const tagTxt  = s.above_ma200 ? '年線上' : '年線下';
+    return `
+    <div class="scard ${cardCls}">
+      <div class="scard-top">
+        <div>
+          <div class="scard-sym">${sym}</div>
+          <div class="scard-name">${NAMES[sym]||''}</div>
+        </div>
+        <span class="scard-tag ${tagCls}">${tagTxt}</span>
+      </div>
+      <div class="scard-price">${f(s.price)}</div>
+      <div class="scard-chg ${cls(dc)}">${fc(dc)} 今日</div>
+      <hr class="scard-divider">
+      <div class="scard-metrics">
+        <div class="metric-row">
+          <span class="metric-lbl">200MA 年線</span>
+          <span class="metric-val">${f(s.ma200)}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">偏離年線</span>
+          <span class="metric-val ${cls(s.pct_from_ma200)}">${fc(s.pct_from_ma200)}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">50MA</span>
+          <span class="metric-val">${f(s.ma50)}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── SOP panel ── */
+const STATUS_LABEL = {normal:'正常', watch:'留意', alert:'警報', active:'啟動', standby:'待命'};
+const STATUS_CLS   = {normal:'badge-normal', watch:'badge-watch', alert:'badge-alert', active:'badge-active', standby:'badge-standby'};
+
+function sopValueClass(key, sop) {
+  if (key==='sop02') return cls(sop.qqq_pct);
+  if (key==='sop03') return cls(sop.daily_change);
+  if (key==='sop04' || key==='sop05') return cls(sop.pct_from_ma);
+  return 'neu';
+}
+
+function renderSOP(sop) {
+  if (!sop) return;
+  const keys = ['sop01','sop02','sop03','sop04','sop05'];
+  document.getElementById('sopStack').innerHTML = keys.map((k,i) => {
+    const s = sop[k]; if (!s) return '';
+    const vc = sopValueClass(k, s);
+    return `
+    <div class="sop-item">
+      <div class="sop-item-hd">
+        <div class="sop-num-title">
+          <span class="sop-num">0${i+1}</span>
+          <span class="sop-name">${s.name}</span>
+        </div>
+        <span class="badge ${STATUS_CLS[s.status]}">${STATUS_LABEL[s.status]||s.status}</span>
+      </div>
+      <div class="sop-item-bd">
+        <div class="sop-rule">${s.desc_rule}</div>
+        <div class="sop-val ${vc}">${s.desc_val}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── Alert list ── */
+function renderAlerts(cur, hist) {
+  const all = [...(cur||[]), ...(hist||[])];
+  const badge = document.getElementById('alertBadge');
+
+  if (!all.length) {
+    document.getElementById('alertList').innerHTML = '<div class="empty-box">目前無觸發紀錄</div>';
+    badge.textContent = '無警報'; badge.style.color = 'var(--txt3)';
+    return;
+  }
+
+  const critCount = all.filter(a=>a.type==='CRITICAL').length;
+  badge.textContent = critCount ? `${critCount} 項警報` : `${all.length} 筆紀錄`;
+  badge.style.color = critCount ? 'var(--red)' : 'var(--yellow)';
+
+  document.getElementById('alertList').innerHTML = all.slice(0,15).map(a => {
+    const dotCls = a.type==='CRITICAL' ? 'adot-crit' : a.type==='BUY' ? 'adot-buy' : 'adot-info';
+    const ts = a.ts ? new Date(a.ts).toLocaleString('zh-TW') : '-';
+    return `
+    <div class="alert-row">
+      <div class="adot ${dotCls}"></div>
+      <div>
+        <div class="alert-ttl">[${a.code}] ${a.title}</div>
+        <div class="alert-msg">${a.msg}</div>
+        <div class="alert-ts">${ts}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── Smile detail ── */
+function renderSmile(sop) {
+  const s04 = sop?.sop04;
+  if (!s04?.smile_levels) return;
+
+  const p = s04.pct_from_ma;
+  const html = `
+    <div class="smile-header">
+      目前 0050 偏離年線：<strong class="${cls(p)}">${fc(p)}</strong>
+    </div>
+    <div class="smile-grid">
+      ${s04.smile_levels.map(l => `
+        <div class="smile-row">
+          <span class="smile-thr ${l.triggered?'pos':'neu'}">${l.threshold}%</span>
+          <div class="smile-track">
+            <div class="smile-fill ${l.triggered?'hit':''}" style="width:${l.triggered?'100':'0'}%"></div>
+          </div>
+          <span class="smile-price-lbl">${l.price>0?f(l.price,2):'-'}</span>
+          <span class="smile-state" style="color:${l.triggered?'var(--green)':'var(--txt3)'}">${l.triggered?'觸及':'未達'}</span>
+        </div>`).join('')}
+    </div>
+    <div class="smile-foot">
+      左側各 5% 買入 &nbsp;|&nbsp; 右側（反彈後）各 2% 買入<br>
+      跌破 -30% 進入冬眠，停止加碼
+    </div>`;
+  document.getElementById('smileDetail').innerHTML = html;
+}
+
+/* ── Chart ── */
+function switchChart(btn, sym) {
+  curSym = sym;
+  document.querySelectorAll('.ctab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderChart(sym);
+}
+
+function renderChart(sym) {
+  const s = state?.stocks?.[sym]; if (!s?.chart) return;
+  const c = s.chart;
+
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  if (chart) chart.destroy();
+
+  // Background gradient
+  const grad = ctx.createLinearGradient(0,0,0,300);
+  grad.addColorStop(0,'rgba(6,182,212,.15)');
+  grad.addColorStop(1,'rgba(6,182,212,0)');
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: c.dates,
+      datasets: [
+        {
+          label: '收盤價',
+          data: c.prices,
+          borderColor: '#06b6d4',
+          backgroundColor: grad,
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.05,
+          order: 3,
+        },
+        {
+          label: '200MA 年線',
+          data: c.ma200,
+          borderColor: '#eab308',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6,3],
+          pointRadius: 0,
+          fill: false,
+          tension: 0.05,
+          order: 1,
+        },
+        {
+          label: '50MA',
+          data: c.ma50,
+          borderColor: 'rgba(239,68,68,.6)',
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          borderDash: [3,2],
+          pointRadius: 0,
+          fill: false,
+          tension: 0.05,
+          order: 2,
+        },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: {duration: 250},
+      plugins: {
+        legend: {display: false},
+        tooltip: {
+          mode: 'index', intersect: false,
+          backgroundColor: '#1c2230',
+          borderColor: '#21283a', borderWidth: 1,
+          titleColor: '#e2e8f4',  bodyColor: '#8896a9',
+          padding: 10,
+          callbacks: {
+            title: items => items[0].label,
+            label: item => ` ${item.dataset.label}: ${item.parsed.y != null ? item.parsed.y.toFixed(2) : 'N/A'}`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: {color: 'rgba(255,255,255,.04)', drawBorder: false},
+          ticks: {
+            color: '#55657a', maxTicksLimit: 7, font:{size:10},
+            maxRotation: 0,
+          }
+        },
+        y: {
+          position: 'right',
+          grid: {color: 'rgba(255,255,255,.04)', drawBorder: false},
+          ticks: {
+            color: '#55657a', font:{size:10, family:"'JetBrains Mono', monospace"},
+          }
+        }
+      },
+      interaction: {mode:'nearest', axis:'x', intersect:false},
+    }
+  });
+}
+
+/* ─── Init ────────────────────────────────────────────────────────────────── */
+loadData();
+setInterval(loadData, 5 * 60 * 1000); // auto-refresh every 5 min
+</script>
+</body>
+</html>
