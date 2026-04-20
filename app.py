@@ -15,10 +15,6 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # ─── Config ─────────────────────────────────────────────────────────────────
-GAS_WEBHOOK_URL = os.environ.get(
-    "GAS_WEBHOOK_URL",
-    "https://script.google.com/macros/s/AKfycbzWRoQA_a3ca_IirluqHY1d63Zo3yvaXaKIu0DY2Fhx3nsLvdGmOw_Tr2NCuuqlclPi/exec",
-)
 LINE_TOKEN   = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_USER_ID = os.environ.get("LINE_USER_ID", "")
 TW_TZ = pytz.timezone("Asia/Taipei")
@@ -249,15 +245,6 @@ def check_alerts(stocks: dict, sop: dict) -> list[dict]:
 
 # ─── Notification ─────────────────────────────────────────────────────────────
 def send_notification(message: str):
-    # 1. GAS webhook
-    if GAS_WEBHOOK_URL:
-        try:
-            r = requests.post(GAS_WEBHOOK_URL, json={"message": message}, timeout=10)
-            logger.info("GAS webhook: %s", r.status_code)
-        except Exception as e:
-            logger.error("GAS error: %s", e)
-
-    # 2. LINE Messaging API (direct push)
     if LINE_TOKEN and LINE_USER_ID:
         try:
             r = requests.post(
