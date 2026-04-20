@@ -38,7 +38,7 @@ TW_SYMBOLS = {
 # US stocks — Twelve Data (free plan supports US exchanges)
 US_SYMBOLS = {
     "QQQ": ("QQQ", "NASDAQ"),
-    "QLD": ("QLD", "NASDAQ"),
+    "QLD": ("QLD", "NYSE Arca"),
 }
 SYMBOL_NAMES = {
     "0050":   "元大台灣50",
@@ -62,8 +62,13 @@ alert_history: list = []
 
 # ─── Taiwan stock helpers (TWSE + Alpha Vantage) ──────────────────────────────
 def _fetch_tw_quotes() -> dict:
-    """Batch-fetch all TW real-time prices from TWSE MIS API (no auth needed)."""
-    ex_ch = "|".join(f"tse_{s.lower()}.tw" for s in TW_SYMBOLS)
+    """Batch-fetch all TW real-time prices from TWSE MIS API (no auth needed).
+    Sends both tse_ and otc_ prefixes so ETFs on either board are found."""
+    parts = []
+    for s in TW_SYMBOLS:
+        parts.append(f"tse_{s.lower()}.tw")
+        parts.append(f"otc_{s.lower()}.tw")
+    ex_ch = "|".join(parts)
     try:
         resp = requests.get(
             "https://mis.twse.com.tw/stock/api/getStockInfo.jsp",
@@ -74,8 +79,8 @@ def _fetch_tw_quotes() -> dict:
         result = {}
         for item in resp.json().get("msgArray", []):
             code  = item.get("c", "").upper()
-            z     = item.get("z", "-")   # current price (- when closed)
-            y     = item.get("y", "-")   # previous close
+            z     = item.get("z", "-")
+            y     = item.get("y", "-")
             price = float(z) if z not in ("-", "") else None
             prev  = float(y) if y not in ("-", "") else None
             if prev is None:
