@@ -15,26 +15,30 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-LINE_TOKEN   = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+LINE_TOKEN  = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_USER_ID = os.environ.get("LINE_USER_ID", "")
-TD_API_KEY   = os.environ.get("TWELVEDATA_API_KEY", "")
+TD_API_KEY  = os.environ.get("TWELVEDATA_API_KEY", "")    # US stocks (free plan)
+AV_API_KEY  = os.environ.get("ALPHAVANTAGE_API_KEY", "")  # TW stock history
 TW_TZ = pytz.timezone("Asia/Taipei")
 
-# Free tier: 800 credits/day, 8 credits/min
-# Price:   4 symbols × 24 refreshes/day  =  96 calls/day ✓
-# History: 4 symbols × 2 refreshes/day   =   8 calls/day ✓
-PRICE_TTL = int(os.environ.get("PRICE_CACHE_SECONDS", "3600"))   # 1 hour
-HIST_TTL  = int(os.environ.get("HIST_CACHE_SECONDS",  "43200"))  # 12 hours
+# Price: every 1h  | History (MA): every 12h
+PRICE_TTL = int(os.environ.get("PRICE_CACHE_SECONDS", "3600"))
+HIST_TTL  = int(os.environ.get("HIST_CACHE_SECONDS",  "43200"))
 
 TD_BASE = "https://api.twelvedata.com"
+AV_BASE = "https://www.alphavantage.co/query"
 
-TD_SYMBOLS = {
-    "0050":   ("0050",   "TWSE"),
-    "QQQ":    ("QQQ",    "NASDAQ"),
-    "00631L": ("00631L", "TWSE"),
-    "QLD":    ("QLD",    "NASDAQ"),
-    "00662":  ("00662",  "TWSE"),
-    "00865B": ("00865B", "TWSE"),
+# Taiwan stocks — TWSE real-time price + Alpha Vantage daily history
+TW_SYMBOLS = {
+    "0050":   "0050.TW",
+    "00631L": "00631L.TW",
+    "00662":  "00662.TW",
+    "00865B": "00865B.TW",
+}
+# US stocks — Twelve Data (free plan supports US exchanges)
+US_SYMBOLS = {
+    "QQQ": ("QQQ", "NASDAQ"),
+    "QLD": ("QLD", "NASDAQ"),
 }
 SYMBOL_NAMES = {
     "0050":   "元大台灣50",
@@ -56,7 +60,73 @@ _cache = {
 alert_history: list = []
 
 
-# ─── Twelve Data helpers ──────────────────────────────────────────────────────
+# ─── Taiwan stock helpers (TWSE + Alpha Vantage) ──────────────────────────────
+def _fetch_tw_quotes() -> dict:
+    """Batch-fetch all TW real-time prices from TWSE MIS API (no auth needed)."""
+    ex_ch = "|".join(f"tse_{s.lower()}.tw" for s in TW_SYMBOLS)
+    try:
+        resp = requests.get(
+            "https://mis.twse.com.tw/stock/api/getStockInfo.jsp",
+            params={"ex_ch": ex_ch, "json": "1", "delay": "0"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        result = {}
+        for item in resp.json().get("msgArray", []):
+            code  = item.get("c", "").upper()
+            z     = item.get("z", "-")   # current price (- when closed)
+            y     = item.get("y", "-")   # previous close
+            price = float(z) if z not in ("-", "") else None
+            prev  = float(y) if y not in ("-", "") else None
+            if prev is None:
+                continue
+            if price is None:
+                price = prev  # market closed — use prev close
+            result[code] = {
+                "price":          price,
+                "prev_close":     prev,
+                "daily_change":   (price - prev) / prev * 100,
+                "is_market_open": z not in ("-", ""),
+            }
+        logger.info("TWSE quotes fetched: %s", list(result.keys()))
+        return result
+    except Exception as exc:
+        logger.error("TWSE quote error: %s", exc)
+        return {}
+
+
+def _fetch_av_history(av_symbol: str) -> pd.DataFrame | None:
+    """Fetch daily history via Alpha Vantage for MA calculation."""
+    if not AV_API_KEY:
+        logger.error("ALPHAVANTAGE_API_KEY not set")
+        return None
+    try:
+        resp = requests.get(AV_BASE, params={
+            "function":   "TIME_SERIES_DAILY_ADJUSTED",
+            "symbol":     av_symbol,
+            "outputsize": "full",
+            "apikey":     AV_API_KEY,
+        }, timeout=30)
+        data = resp.json()
+        ts = data.get("Time Series (Daily)")
+        if not ts:
+            note = data.get("Note") or data.get("Information") or data.get("Error Message") or "unknown"
+            logger.error("AV no data for %s: %s", av_symbol, note)
+            return None
+        df = pd.DataFrame.from_dict(ts, orient="index")
+        df.index = pd.to_datetime(df.index)
+        df = df.sort_index()
+        df["Close"] = df["5. adjusted close"].astype(float)
+        df["MA200"]  = df["Close"].rolling(200).mean()
+        df["MA50"]   = df["Close"].rolling(50).mean()
+        logger.info("AV history fetched %s (%d rows)", av_symbol, len(df))
+        return df
+    except Exception as exc:
+        logger.error("AV fetch error %s: %s", av_symbol, exc)
+        return None
+
+
+# ─── US stock helpers (Twelve Data) ──────────────────────────────────────────
 def _td_get(endpoint: str, params: dict) -> dict | None:
     if not TD_API_KEY:
         logger.error("TWELVEDATA_API_KEY not set")
@@ -74,7 +144,7 @@ def _td_get(endpoint: str, params: dict) -> dict | None:
         return None
 
 
-def _fetch_history(sym: str, exchange: str) -> pd.DataFrame | None:
+def _fetch_td_history(sym: str, exchange: str) -> pd.DataFrame | None:
     data = _td_get("time_series", {
         "symbol": sym, "exchange": exchange,
         "interval": "1day", "outputsize": "500",
@@ -83,7 +153,6 @@ def _fetch_history(sym: str, exchange: str) -> pd.DataFrame | None:
         return None
     values = data.get("values", [])
     if not values:
-        logger.error("TD no values for %s", sym)
         return None
     df = pd.DataFrame(values)
     df.index = pd.to_datetime(df["datetime"])
@@ -91,11 +160,11 @@ def _fetch_history(sym: str, exchange: str) -> pd.DataFrame | None:
     df["Close"] = df["close"].astype(float)
     df["MA200"]  = df["Close"].rolling(200).mean()
     df["MA50"]   = df["Close"].rolling(50).mean()
-    logger.info("History fetched %s (%d rows)", sym, len(df))
+    logger.info("TD history fetched %s (%d rows)", sym, len(df))
     return df
 
 
-def _fetch_quote(sym: str, exchange: str) -> dict | None:
+def _fetch_td_quote(sym: str, exchange: str) -> dict | None:
     data = _td_get("quote", {"symbol": sym, "exchange": exchange})
     if not data:
         return None
@@ -111,7 +180,7 @@ def _fetch_quote(sym: str, exchange: str) -> dict | None:
         return None
 
 
-# ─── Build stock entry ────────────────────────────────────────────────────────
+# ─── Build entry (same regardless of data source) ────────────────────────────
 def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
     current   = quote["price"]
     prev      = quote["prev_close"]
@@ -156,24 +225,41 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
 # ─── Refresh logic ────────────────────────────────────────────────────────────
 def _do_refresh(refresh_hist: bool, refresh_price: bool):
     if refresh_hist:
-        logger.info("Refreshing histories…")
-        for i, (name, (sym, exch)) in enumerate(TD_SYMBOLS.items()):
+        logger.info("Refreshing TW histories (Alpha Vantage)…")
+        for i, (name, av_sym) in enumerate(TW_SYMBOLS.items()):
             if i > 0:
-                time.sleep(8)  # stay under 8 calls/min
-            hist = _fetch_history(sym, exch)
+                time.sleep(13)  # AV free: 5 calls/min
+            hist = _fetch_av_history(av_sym)
             if hist is not None:
                 _cache["histories"][name] = hist
+
+        logger.info("Refreshing US histories (Twelve Data)…")
+        for i, (name, (sym, exch)) in enumerate(US_SYMBOLS.items()):
+            if i > 0:
+                time.sleep(8)   # TD free: 8 calls/min
+            hist = _fetch_td_history(sym, exch)
+            if hist is not None:
+                _cache["histories"][name] = hist
+
         _cache["hist_ts"] = time.time()
 
     if refresh_price:
-        logger.info("Refreshing prices…")
-        for i, (name, (sym, exch)) in enumerate(TD_SYMBOLS.items()):
+        logger.info("Refreshing TW prices (TWSE)…")
+        tw_quotes = _fetch_tw_quotes()
+        for name, quote in tw_quotes.items():
+            hist = _cache["histories"].get(name)
+            if hist is not None:
+                _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
+
+        logger.info("Refreshing US prices (Twelve Data)…")
+        for i, (name, (sym, exch)) in enumerate(US_SYMBOLS.items()):
             if i > 0:
                 time.sleep(8)
-            quote = _fetch_quote(sym, exch)
+            quote = _fetch_td_quote(sym, exch)
             hist  = _cache["histories"].get(name)
             if quote and hist is not None:
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
+
         _cache["price_ts"] = time.time()
 
 
@@ -407,13 +493,7 @@ def api_refresh():
 
 @app.route("/webhook", methods=["POST"])
 def line_webhook():
-    body   = request.get_data(as_text=True)
-    events = {}
-    try:
-        events = request.get_json(silent=True) or {}
-    except Exception:
-        pass
-    for event in events.get("events", []):
+    for event in (request.get_json(silent=True) or {}).get("events", []):
         uid = event.get("source", {}).get("userId")
         if uid:
             logger.info("LINE userId: %s", uid)
