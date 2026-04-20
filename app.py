@@ -107,7 +107,7 @@ def _fetch_av_history(av_symbol: str) -> pd.DataFrame | None:
         return None
     try:
         resp = requests.get(AV_BASE, params={
-            "function":   "TIME_SERIES_DAILY_ADJUSTED",
+            "function":   "TIME_SERIES_DAILY",
             "symbol":     av_symbol,
             "outputsize": "full",
             "apikey":     AV_API_KEY,
@@ -121,7 +121,7 @@ def _fetch_av_history(av_symbol: str) -> pd.DataFrame | None:
         df = pd.DataFrame.from_dict(ts, orient="index")
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
-        df["Close"] = df["5. adjusted close"].astype(float)
+        df["Close"] = df["4. close"].astype(float)
         df["MA200"]  = df["Close"].rolling(200).mean()
         df["MA50"]   = df["Close"].rolling(50).mean()
         logger.info("AV history fetched %s (%d rows)", av_symbol, len(df))
