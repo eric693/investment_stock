@@ -1,6 +1,8 @@
 import os
 import time
+import random
 import logging
+import threading
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request
 import yfinance as yf
@@ -18,7 +20,13 @@ app = Flask(__name__)
 LINE_TOKEN   = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_USER_ID = os.environ.get("LINE_USER_ID", "")
 TW_TZ = pytz.timezone("Asia/Taipei")
-CACHE_DURATION = int(os.environ.get("CACHE_SECONDS", "300"))   # 5-min cache
+CACHE_DURATION = int(os.environ.get("CACHE_SECONDS", "1800"))  # 30-min cache
+
+_HEADERS_POOL = [
+    {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
+    {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"},
+    {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"},
+]
 
 SYMBOLS = {
     "0050":    "0050.TW",
@@ -34,23 +42,33 @@ SYMBOL_NAMES = {
 }
 
 # ─── In-memory cache ─────────────────────────────────────────────────────────
-_cache: dict = {"data": None, "ts": 0.0}
+_cache: dict = {"data": None, "ts": 0.0, "refreshing": False}
 alert_history: list = []
 
 
 # ─── Data helpers ─────────────────────────────────────────────────────────────
-def _fetch(symbol: str) -> pd.DataFrame | None:
-    """Fetch 2 years of OHLCV and compute MA50/MA200."""
-    try:
-        hist = yf.Ticker(symbol).history(period="2y")
-        if hist.empty:
-            return None
-        hist["MA200"] = hist["Close"].rolling(200).mean()
-        hist["MA50"]  = hist["Close"].rolling(50).mean()
-        return hist
-    except Exception as exc:
-        logger.error("Fetch error %s: %s", symbol, exc)
-        return None
+def _fetch(symbol: str, retries: int = 4) -> pd.DataFrame | None:
+    for attempt in range(retries):
+        try:
+            session = requests.Session()
+            session.headers.update(random.choice(_HEADERS_POOL))
+            ticker = yf.Ticker(symbol, session=session)
+            hist = ticker.history(period="2y")
+            if not hist.empty:
+                hist["MA200"] = hist["Close"].rolling(200).mean()
+                hist["MA50"]  = hist["Close"].rolling(50).mean()
+                return hist
+        except Exception as exc:
+            msg = str(exc)
+            if "Too Many Requests" in msg or "Rate" in msg:
+                wait = 2 ** attempt + random.uniform(1, 3)
+                logger.warning("Rate limited %s (attempt %d), retry in %.1fs", symbol, attempt + 1, wait)
+                time.sleep(wait)
+            else:
+                logger.error("Fetch error %s: %s", symbol, exc)
+                return None
+    logger.error("Fetch failed %s after %d retries", symbol, retries)
+    return None
 
 
 def _build_stock_entry(name: str, hist: pd.DataFrame) -> dict:
@@ -99,20 +117,46 @@ def _build_stock_entry(name: str, hist: pd.DataFrame) -> dict:
 
 def get_dashboard_data() -> dict:
     stocks = {}
-    for name, sym in SYMBOLS.items():
+    for i, (name, sym) in enumerate(SYMBOLS.items()):
+        if i > 0:
+            time.sleep(random.uniform(1.5, 3.0))  # stagger requests
         hist = _fetch(sym)
         if hist is not None and len(hist) >= 5:
             stocks[name] = _build_stock_entry(name, hist)
     return stocks
 
 
+def _background_refresh():
+    if _cache["refreshing"]:
+        return
+    _cache["refreshing"] = True
+    try:
+        logger.info("Background refresh started…")
+        new_data = get_dashboard_data()
+        if new_data:
+            _cache["data"] = new_data
+            _cache["ts"]   = time.time()
+            logger.info("Background refresh done.")
+    except Exception as exc:
+        logger.error("Background refresh error: %s", exc)
+    finally:
+        _cache["refreshing"] = False
+
+
 def cached_data() -> dict:
     now = time.time()
-    if _cache["data"] is None or (now - _cache["ts"]) > CACHE_DURATION:
-        logger.info("Refreshing stock data cache…")
-        _cache["data"] = get_dashboard_data()
-        _cache["ts"]   = now
-    return _cache["data"]
+    age = now - _cache["ts"]
+
+    if _cache["data"] is None:
+        # Cold start — must block
+        logger.info("Cold start: fetching stock data…")
+        _background_refresh()
+    elif age > CACHE_DURATION and not _cache["refreshing"]:
+        # Stale — serve old data, refresh in background
+        logger.info("Cache stale (%.0fs), triggering background refresh…", age)
+        threading.Thread(target=_background_refresh, daemon=True).start()
+
+    return _cache["data"] or {}
 
 
 # ─── SOP logic ────────────────────────────────────────────────────────────────
@@ -304,10 +348,9 @@ def api_notify():
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    """Force-clear cache and reload data."""
     _cache["ts"] = 0.0
-    cached_data()
-    return jsonify({"ok": True})
+    threading.Thread(target=_background_refresh, daemon=True).start()
+    return jsonify({"ok": True, "msg": "Refresh triggered in background"})
 
 
 @app.route("/webhook", methods=["POST"])
