@@ -58,6 +58,7 @@ _cache = {
     "refreshing": False,
 }
 alert_history: list = []
+_line_users: dict = {}   # uid -> {last_msg, last_seen}
 
 
 # ─── Taiwan stock helpers (TWSE + Alpha Vantage) ──────────────────────────────
@@ -608,14 +609,34 @@ def line_webhook():
     events = body.get("events", [])
     logger.info("Webhook received: %d event(s)", len(events))
     for event in events:
-        uid         = event.get("source", {}).get("userId", "")
+        uid = event.get("source", {}).get("userId", "")
+        if uid:
+            _line_users[uid] = {"last_seen": datetime.now(TW_TZ).isoformat()}
+
+        if event.get("type") != "message":
+            continue
+        if event.get("message", {}).get("type") != "text":
+            continue
+
         reply_token = event.get("replyToken", "")
         msg_text    = event.get("message", {}).get("text", "").strip()
-        logger.info("Event type=%s uid=%s msg=%r reply_token=%s",
-                    event.get("type"), uid, msg_text, bool(reply_token))
-        if reply_token and msg_text.lower() in ("id", "我的id", "userid", "user id"):
+        logger.info("Message uid=%s msg=%r", uid, msg_text)
+
+        if uid:
+            _line_users[uid]["last_msg"] = msg_text
+
+        if reply_token and msg_text.lower() in ("id", "我的id", "userid", "user id", "my id"):
             _line_reply(reply_token, f"你的 LINE User ID 是：\n{uid}")
     return "OK", 200
+
+
+@app.route("/api/line-users")
+def api_line_users():
+    return jsonify({
+        "token_configured": bool(LINE_TOKEN),
+        "push_users_configured": LINE_USER_IDS,
+        "seen_users": _line_users,
+    })
 
 
 if __name__ == "__main__":
