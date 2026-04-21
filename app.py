@@ -586,12 +586,30 @@ def api_refresh():
     return jsonify({"ok": True, "msg": "Full refresh triggered in background"})
 
 
+def _line_reply(reply_token: str, message: str):
+    if not LINE_TOKEN:
+        return
+    try:
+        requests.post(
+            "https://api.line.me/v2/bot/message/reply",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {LINE_TOKEN}"},
+            json={"replyToken": reply_token, "messages": [{"type": "text", "text": message}]},
+            timeout=10,
+        )
+    except Exception as e:
+        logger.error("LINE reply error: %s", e)
+
+
 @app.route("/webhook", methods=["POST"])
 def line_webhook():
     for event in (request.get_json(silent=True) or {}).get("events", []):
-        uid = event.get("source", {}).get("userId")
+        uid         = event.get("source", {}).get("userId", "")
+        reply_token = event.get("replyToken", "")
+        msg_text    = event.get("message", {}).get("text", "").strip()
         if uid:
             logger.info("LINE userId: %s", uid)
+        if reply_token and msg_text.lower() in ("id", "我的id", "userid", "user id"):
+            _line_reply(reply_token, f"你的 LINE User ID 是：\n{uid}")
     return "OK", 200
 
 
