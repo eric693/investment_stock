@@ -588,26 +588,31 @@ def api_refresh():
 
 def _line_reply(reply_token: str, message: str):
     if not LINE_TOKEN:
+        logger.error("LINE reply skipped: LINE_CHANNEL_ACCESS_TOKEN is not set")
         return
     try:
-        requests.post(
+        r = requests.post(
             "https://api.line.me/v2/bot/message/reply",
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {LINE_TOKEN}"},
             json={"replyToken": reply_token, "messages": [{"type": "text", "text": message}]},
             timeout=10,
         )
+        logger.info("LINE reply status: %s body: %s", r.status_code, r.text)
     except Exception as e:
         logger.error("LINE reply error: %s", e)
 
 
 @app.route("/webhook", methods=["POST"])
 def line_webhook():
-    for event in (request.get_json(silent=True) or {}).get("events", []):
+    body = request.get_json(silent=True) or {}
+    events = body.get("events", [])
+    logger.info("Webhook received: %d event(s)", len(events))
+    for event in events:
         uid         = event.get("source", {}).get("userId", "")
         reply_token = event.get("replyToken", "")
         msg_text    = event.get("message", {}).get("text", "").strip()
-        if uid:
-            logger.info("LINE userId: %s", uid)
+        logger.info("Event type=%s uid=%s msg=%r reply_token=%s",
+                    event.get("type"), uid, msg_text, bool(reply_token))
         if reply_token and msg_text.lower() in ("id", "我的id", "userid", "user id"):
             _line_reply(reply_token, f"你的 LINE User ID 是：\n{uid}")
     return "OK", 200
