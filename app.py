@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 LINE_TOKEN  = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-LINE_USER_ID = os.environ.get("LINE_USER_ID", "")
+LINE_USER_IDS = [uid.strip() for uid in os.environ.get("LINE_USER_ID", "").split(",") if uid.strip()]
 TD_API_KEY  = os.environ.get("TWELVEDATA_API_KEY", "")    # US stocks (free plan)
 AV_API_KEY  = os.environ.get("ALPHAVANTAGE_API_KEY", "")  # TW stock history
 TW_TZ = pytz.timezone("Asia/Taipei")
@@ -515,7 +515,9 @@ def check_alerts(stocks: dict, sop: dict) -> list[dict]:
 
 # ─── Notification ─────────────────────────────────────────────────────────────
 def send_notification(message: str):
-    if LINE_TOKEN and LINE_USER_ID:
+    if not LINE_TOKEN or not LINE_USER_IDS:
+        return
+    for uid in LINE_USER_IDS:
         try:
             r = requests.post(
                 "https://api.line.me/v2/bot/message/push",
@@ -523,12 +525,12 @@ def send_notification(message: str):
                     "Content-Type":  "application/json",
                     "Authorization": f"Bearer {LINE_TOKEN}",
                 },
-                json={"to": LINE_USER_ID, "messages": [{"type": "text", "text": message}]},
+                json={"to": uid, "messages": [{"type": "text", "text": message}]},
                 timeout=10,
             )
-            logger.info("LINE push: %s", r.status_code)
+            logger.info("LINE push to %s: %s", uid, r.status_code)
         except Exception as e:
-            logger.error("LINE error: %s", e)
+            logger.error("LINE error (uid=%s): %s", uid, e)
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
