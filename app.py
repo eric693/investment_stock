@@ -184,6 +184,70 @@ def _fetch_td_history(sym: str, exchange: str) -> pd.DataFrame | None:
     return df
 
 
+def _fetch_yahoo_history(ticker: str) -> pd.DataFrame | None:
+    """Fallback: fetch daily history from Yahoo Finance (no auth needed)."""
+    try:
+        resp = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+            params={"interval": "1d", "range": "2y"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=20,
+        )
+        data = resp.json()
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            logger.warning("Yahoo history empty for %s", ticker)
+            return None
+        r = result[0]
+        timestamps = r.get("timestamp", [])
+        closes = r.get("indicators", {}).get("quote", [{}])[0].get("close", [])
+        rows = [
+            {"date": pd.Timestamp(ts, unit="s").strftime("%Y-%m-%d"), "Close": float(c)}
+            for ts, c in zip(timestamps, closes) if c is not None
+        ]
+        if not rows:
+            return None
+        df = pd.DataFrame(rows)
+        df.index = pd.to_datetime(df["date"])
+        df = df.sort_index()
+        df["MA200"] = df["Close"].rolling(200).mean()
+        df["MA50"]  = df["Close"].rolling(50).mean()
+        logger.info("Yahoo history %s: %d rows", ticker, len(df))
+        return df
+    except Exception as exc:
+        logger.error("Yahoo history error %s: %s", ticker, exc)
+        return None
+
+
+def _fetch_yahoo_quote(ticker: str) -> dict | None:
+    """Fallback: fetch real-time quote from Yahoo Finance."""
+    try:
+        resp = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+            params={"interval": "1d", "range": "5d"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        data = resp.json()
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            return None
+        meta = result[0].get("meta", {})
+        price = meta.get("regularMarketPrice") or meta.get("previousClose")
+        prev  = meta.get("previousClose") or price
+        if not price:
+            return None
+        return {
+            "price":          float(price),
+            "prev_close":     float(prev),
+            "daily_change":   (float(price) - float(prev)) / float(prev) * 100 if prev else 0.0,
+            "is_market_open": meta.get("marketState") == "REGULAR",
+        }
+    except Exception as exc:
+        logger.error("Yahoo quote error %s: %s", ticker, exc)
+        return None
+
+
 def _fetch_td_quote(sym: str, exchange: str) -> dict | None:
     params = {"symbol": sym}
     if exchange:
@@ -252,6 +316,9 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
         for name, av_sym in TW_SYMBOLS.items():
             stock_no = av_sym.replace(".TW", "")
             hist = _fetch_twse_history(stock_no)
+            if hist is None:
+                logger.warning("TWSE history failed for %s, trying Yahoo Finance…", name)
+                hist = _fetch_yahoo_history(av_sym)
             if hist is not None:
                 _cache["histories"][name] = hist
 
@@ -268,9 +335,13 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
     if refresh_price:
         logger.info("Refreshing TW prices (TWSE)…")
         tw_quotes = _fetch_tw_quotes()
-        for name, quote in tw_quotes.items():
+        for name, av_sym in TW_SYMBOLS.items():
+            quote = tw_quotes.get(name)
+            if quote is None:
+                logger.warning("TWSE quote missing for %s, trying Yahoo Finance…", name)
+                quote = _fetch_yahoo_quote(av_sym)
             hist = _cache["histories"].get(name)
-            if hist is not None:
+            if quote and hist is not None:
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
 
         logger.info("Refreshing US prices (Twelve Data)…")

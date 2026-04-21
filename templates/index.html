@@ -112,7 +112,7 @@ button { cursor: pointer; font-family: inherit; }
 /* ─── Stock grid ──────────────────────────────────────────────────────── */
 .stock-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
 
@@ -346,6 +346,9 @@ button { cursor: pointer; font-family: inherit; }
   .content-row { grid-template-columns: 1fr; }
   .bottom-row  { grid-template-columns: 1fr; }
 }
+@media (max-width: 768px) {
+  .stock-grid  { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -409,6 +412,8 @@ button { cursor: pointer; font-family: inherit; }
           <button class="ctab"        data-sym="QQQ"    onclick="switchChart(this,'QQQ')">QQQ</button>
           <button class="ctab"        data-sym="00631L" onclick="switchChart(this,'00631L')">00631L</button>
           <button class="ctab"        data-sym="QLD"    onclick="switchChart(this,'QLD')">QLD</button>
+          <button class="ctab"        data-sym="00662"  onclick="switchChart(this,'00662')">00662</button>
+          <button class="ctab"        data-sym="00865B" onclick="switchChart(this,'00865B')">00865B</button>
         </div>
       </div>
       <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
@@ -535,7 +540,7 @@ async function testNotify() {
 function render() {
   if (!state) return;
   document.getElementById('updatedAt').textContent = state.updated_at || '-';
-  document.getElementById('cacheAge').textContent  = state.cache_age  || '-';
+  document.getElementById('cacheAge').textContent  = state.price_age  ?? '-';
 
   renderStockGrid(state.stocks);
   renderSOP(state.sop);
@@ -547,9 +552,10 @@ function render() {
 /* ── Stock grid ── */
 const NAMES = {
   '0050':'元大台灣50', 'QQQ':'Invesco QQQ',
-  '00631L':'台灣50正2', 'QLD':'Ultra QQQ (2x)'
+  '00631L':'台灣50正2', 'QLD':'Ultra QQQ (2x)',
+  '00662':'富邦NASDAQ', '00865B':'國泰US短債'
 };
-const ORDER = ['0050','QQQ','00631L','QLD'];
+const ORDER = ['0050','QQQ','00631L','QLD','00662','00865B'];
 
 function renderStockGrid(stocks) {
   if (!stocks) return;
