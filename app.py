@@ -57,7 +57,6 @@ _cache = {
     "price_ts":   0.0,
     "refreshing": False,
 }
-_refresh_lock = threading.Lock()
 alert_history: list = []
 _line_users: dict = {}   # uid -> {last_msg, last_seen}
 
@@ -314,13 +313,13 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
 # ─── Refresh logic ────────────────────────────────────────────────────────────
 def _do_refresh(refresh_hist: bool, refresh_price: bool):
     if refresh_hist:
-        logger.info("Refreshing TW histories (Yahoo Finance first)…")
+        logger.info("Refreshing TW histories (TWSE monthly API)…")
         for name, av_sym in TW_SYMBOLS.items():
-            hist = _fetch_yahoo_history(av_sym)
+            stock_no = av_sym.replace(".TW", "")
+            hist = _fetch_twse_history(stock_no)
             if hist is None:
-                logger.warning("Yahoo history failed for %s, trying TWSE…", name)
-                stock_no = av_sym.replace(".TW", "")
-                hist = _fetch_twse_history(stock_no)
+                logger.warning("TWSE history failed for %s, trying Yahoo Finance…", name)
+                hist = _fetch_yahoo_history(av_sym)
             if hist is not None:
                 _cache["histories"][name] = hist
 
@@ -359,7 +358,7 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
 
 
 def _background_refresh(hist: bool = False, price: bool = True):
-    if not _refresh_lock.acquire(blocking=False):
+    if _cache["refreshing"]:
         return
     _cache["refreshing"] = True
     try:
@@ -369,7 +368,6 @@ def _background_refresh(hist: bool = False, price: bool = True):
         logger.error("Refresh error: %s", exc)
     finally:
         _cache["refreshing"] = False
-        _refresh_lock.release()
 
 
 def cached_data() -> dict:
@@ -377,13 +375,13 @@ def cached_data() -> dict:
     need_hist  = not _cache["histories"] or (now - _cache["hist_ts"])  > HIST_TTL
     need_price = not _cache["stocks"]    or (now - _cache["price_ts"]) > PRICE_TTL
 
-    if (not _cache["stocks"] or need_hist or need_price) and not _cache["refreshing"]:
-        is_cold = not _cache["stocks"]
-        if is_cold:
-            logger.info("Cold start…")
+    if not _cache["stocks"]:
+        logger.info("Cold start…")
+        _background_refresh(hist=True, price=True)
+    elif (need_hist or need_price) and not _cache["refreshing"]:
         threading.Thread(
             target=_background_refresh,
-            kwargs={"hist": is_cold or need_hist, "price": True},
+            kwargs={"hist": need_hist, "price": need_price},
             daemon=True,
         ).start()
 
