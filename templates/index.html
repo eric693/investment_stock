@@ -502,7 +502,7 @@ async function loadData() {
     if (!r.ok) throw new Error(r.statusText);
     state = await r.json();
     render();
-    if (state.stocks && Object.keys(state.stocks).length === 0) {
+    if (state.stocks && Object.keys(state.stocks).length < ORDER.length) {
       setTimeout(loadData, 10000);
     }
   } catch(e) {
