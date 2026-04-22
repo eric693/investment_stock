@@ -132,8 +132,8 @@ button { cursor: pointer; font-family: inherit; }
   pointer-events: none;
   border-top: 2px solid transparent;
 }
-.scard.up::after   { border-top-color: var(--green); }
-.scard.down::after { border-top-color: var(--red); }
+.scard.up::after   { border-top-color: var(--red); }
+.scard.down::after { border-top-color: var(--green); }
 .scard.flat::after { border-top-color: var(--border2); }
 
 .scard-top {
@@ -146,8 +146,8 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
   padding: 2px 7px; border-radius: 10px;
 }
-.tag-above { background: var(--green-dim); color: var(--green); }
-.tag-below { background: var(--red-dim); color: var(--red); }
+.tag-above { background: var(--red-dim); color: var(--red); }
+.tag-below { background: var(--green-dim); color: var(--green); }
 
 .scard-price {
   font-family: 'JetBrains Mono', monospace;
@@ -158,8 +158,8 @@ button { cursor: pointer; font-family: inherit; }
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px; font-weight: 600;
 }
-.pos { color: var(--green); }
-.neg { color: var(--red); }
+.pos { color: var(--red); }
+.neg { color: var(--green); }
 .neu { color: var(--txt2); }
 
 .scard-divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
@@ -303,7 +303,7 @@ button { cursor: pointer; font-family: inherit; }
   background: var(--border2);
   transition: background .3s, width .4s;
 }
-.smile-fill.hit { background: var(--green); }
+.smile-fill.hit { background: var(--red); }
 .smile-price-lbl {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px; color: var(--txt3); width: 52px;
@@ -678,7 +678,7 @@ function renderSmile(sop) {
             <div class="smile-fill ${l.triggered?'hit':''}" style="width:${l.triggered?'100':'0'}%"></div>
           </div>
           <span class="smile-price-lbl">${l.price>0?f(l.price,2):'-'}</span>
-          <span class="smile-state" style="color:${l.triggered?'var(--green)':'var(--txt3)'}">${l.triggered?'觸及':'未達'}</span>
+          <span class="smile-state" style="color:${l.triggered?'var(--red)':'var(--txt3)'}">${l.triggered?'觸及':'未達'}</span>
         </div>`).join('')}
     </div>
     <div class="smile-foot">
