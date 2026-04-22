@@ -375,9 +375,13 @@ def cached_data() -> dict:
     need_hist  = not _cache["histories"] or (now - _cache["hist_ts"])  > HIST_TTL
     need_price = not _cache["stocks"]    or (now - _cache["price_ts"]) > PRICE_TTL
 
-    if not _cache["stocks"]:
+    if not _cache["stocks"] and not _cache["refreshing"]:
         logger.info("Cold start…")
-        _background_refresh(hist=True, price=True)
+        threading.Thread(
+            target=_background_refresh,
+            kwargs={"hist": True, "price": True},
+            daemon=True,
+        ).start()
     elif (need_hist or need_price) and not _cache["refreshing"]:
         threading.Thread(
             target=_background_refresh,
