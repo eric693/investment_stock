@@ -170,12 +170,25 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 9px; font-weight: 700; letter-spacing: .3px;
   padding: 1px 5px; border-radius: 4px;
 }
-.ind-overbought { background: var(--red-dim);    color: var(--red);    }
-.ind-oversold   { background: var(--green-dim);  color: var(--green);  }
-.ind-golden     { background: var(--green-dim);  color: var(--green);  }
-.ind-dead       { background: var(--red-dim);    color: var(--red);    }
-.ind-bull       { background: var(--cyan-dim);   color: var(--cyan);   }
-.ind-bear       { background: rgba(255,255,255,.05); color: var(--txt3); }
+.ind-overbought  { background: var(--red-dim);               color: var(--red);    }
+.ind-oversold    { background: var(--green-dim);             color: var(--green);  }
+.ind-golden      { background: var(--green-dim);             color: var(--green);  }
+.ind-dead        { background: var(--red-dim);               color: var(--red);    }
+.ind-bull        { background: var(--cyan-dim);              color: var(--cyan);   }
+.ind-bear        { background: rgba(255,255,255,.05);        color: var(--txt3);   }
+.ind-bearish-div { background: rgba(251,146,60,.15); color: #fb923c;
+                   border: 1px solid rgba(251,146,60,.35); }
+.ind-bullish-div { background: rgba(168,85,247,.15);  color: var(--accent2);
+                   border: 1px solid rgba(168,85,247,.35); }
+
+/* divergence banner inside card top */
+.div-banner {
+  font-size: 9px; font-weight: 700; letter-spacing: .4px;
+  padding: 3px 10px; margin: -16px -18px 10px;
+  display: flex; align-items: center; gap: 6px;
+}
+.div-banner-bearish { background: rgba(251,146,60,.12); border-bottom: 1px solid rgba(251,146,60,.25); color: #fb923c; }
+.div-banner-bullish { background: rgba(168,85,247,.12); border-bottom: 1px solid rgba(168,85,247,.25); color: var(--accent2); }
 
 /* ─── Main content ────────────────────────────────────────────────────── */
 .content-row {
@@ -587,6 +600,18 @@ function kdColor(k) {
   if (k < 20)   return 'var(--green)';
   return 'var(--txt2)';
 }
+function divBadge(div) {
+  if (!div)          return '<span style="color:var(--txt3)">-</span>';
+  if (div.bearish)   return '<span class="ind-badge ind-bearish-div">↑↓ 頂部背離</span>';
+  if (div.bullish)   return '<span class="ind-badge ind-bullish-div">↓↑ 底部背離</span>';
+  return '<span style="color:var(--txt3);font-size:10px">正常</span>';
+}
+function divBanner(div) {
+  if (!div || (!div.bearish && !div.bullish)) return '';
+  if (div.bearish) return `<div class="div-banner div-banner-bearish">▲ 頂部背離警示 — 動能衰退，留意假突破，暫緩追高正2</div>`;
+  if (div.bullish) return `<div class="div-banner div-banner-bullish">▼ 底部背離確認 — 下跌動能枯竭，佈局信心增強</div>`;
+  return '';
+}
 
 function renderStockGrid(stocks) {
   if (!stocks) return;
@@ -600,6 +625,7 @@ function renderStockGrid(stocks) {
 
     return `
     <div class="scard ${cardCls}">
+      ${divBanner(s.divergence)}
       <div class="scard-top">
         <div>
           <div class="scard-sym">${sym}</div>
@@ -637,6 +663,10 @@ function renderStockGrid(stocks) {
         <div class="metric-row">
           <span class="metric-lbl">MACD</span>
           <span class="metric-val">${macdBadge(s.macd_cross, s.macd_trend)}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">背離偵測</span>
+          <span class="metric-val">${divBadge(s.divergence)}</span>
         </div>
       </div>
     </div>`;

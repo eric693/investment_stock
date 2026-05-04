@@ -91,6 +91,76 @@ def _calc_kd(df: pd.DataFrame, period: int = 9):
     return k, d
 
 
+# ─── Divergence Detection ─────────────────────────────────────────────────────
+def _find_peaks(series: pd.Series, order: int = 7) -> list[int]:
+    """Local maxima indices (0-based) with at least `order` bars on each side."""
+    peaks = []
+    n = len(series)
+    for i in range(order, n - order):
+        window = series.iloc[i - order: i + order + 1]
+        if (series.iloc[i] == window.max()
+                and series.iloc[i] > series.iloc[i - 1]
+                and series.iloc[i] > series.iloc[i + 1]):
+            peaks.append(i)
+    return peaks
+
+
+def _find_troughs(series: pd.Series, order: int = 7) -> list[int]:
+    """Local minima indices (0-based)."""
+    troughs = []
+    n = len(series)
+    for i in range(order, n - order):
+        window = series.iloc[i - order: i + order + 1]
+        if (series.iloc[i] == window.min()
+                and series.iloc[i] < series.iloc[i - 1]
+                and series.iloc[i] < series.iloc[i + 1]):
+            troughs.append(i)
+    return troughs
+
+
+def _calc_divergence(close: pd.Series, rsi: pd.Series,
+                     lookback: int = 60, order: int = 7) -> dict:
+    """
+    Bearish (頂部背離): price higher-high but RSI lower-high → fake breakout risk.
+    Bullish (底部背離): price lower-low but RSI higher-low  → exhausted selling.
+    Returns dict with keys: bearish, bullish, desc.
+    """
+    empty = {"bearish": False, "bullish": False, "desc": "正常"}
+
+    cl = close.tail(lookback).reset_index(drop=True)
+    rs = rsi.tail(lookback).reset_index(drop=True).ffill().fillna(50)
+
+    if len(cl) < order * 3:
+        return empty
+
+    price_peaks   = _find_peaks(cl,   order)
+    price_troughs = _find_troughs(cl, order)
+
+    bearish = False
+    bullish = False
+
+    # Bearish: price makes higher-high, RSI makes lower-high (≥2 pt gap)
+    if len(price_peaks) >= 2:
+        p1, p2 = price_peaks[-2], price_peaks[-1]
+        if cl.iloc[p2] > cl.iloc[p1] and rs.iloc[p2] < rs.iloc[p1] - 2:
+            bearish = True
+
+    # Bullish: price makes lower-low, RSI makes higher-low (≥2 pt gap)
+    if len(price_troughs) >= 2:
+        t1, t2 = price_troughs[-2], price_troughs[-1]
+        if cl.iloc[t2] < cl.iloc[t1] and rs.iloc[t2] > rs.iloc[t1] + 2:
+            bullish = True
+
+    if bearish:
+        desc = "頂部背離：價格創高但RSI未跟上，假突破風險"
+    elif bullish:
+        desc = "底部背離：價格破低但RSI止穩，底部訊號浮現"
+    else:
+        desc = "正常"
+
+    return {"bearish": bearish, "bullish": bullish, "desc": desc}
+
+
 # ─── Taiwan stock helpers ─────────────────────────────────────────────────────
 def _fetch_tw_quotes() -> dict:
     parts = []
@@ -420,6 +490,9 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
         k_val = float(k_s.iloc[-1]) if not pd.isna(k_s.iloc[-1]) else None
         d_val = float(d_s.iloc[-1]) if not pd.isna(d_s.iloc[-1]) else None
 
+    # Divergence (RSI vs Price, 60-bar lookback)
+    divergence = _calc_divergence(hist["Close"], rsi_series)
+
     ch = hist.tail(252)
     chart = {
         "dates":  ch.index.strftime("%Y-%m-%d").tolist(),
@@ -443,9 +516,10 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
         "macd_signal":    round(macd_sig, 4) if macd_sig is not None else None,
         "macd_cross":     macd_cross,
         "macd_trend":     macd_trend,
-        "k_val":          round(k_val, 2) if k_val is not None else None,
-        "d_val":          round(d_val, 2) if d_val is not None else None,
-        "chart":          chart,
+        "k_val":      round(k_val, 2) if k_val is not None else None,
+        "d_val":      round(d_val, 2) if d_val is not None else None,
+        "divergence": divergence,
+        "chart":      chart,
     }
 
 
@@ -559,6 +633,9 @@ def compute_sop(stocks: dict) -> dict:
     macd_trend = tw.get("macd_trend")
     k_val      = tw.get("k_val")
     d_val      = tw.get("d_val")
+    div        = tw.get("divergence") or {}
+    bearish_div = div.get("bearish", False)
+    bullish_div = div.get("bullish", False)
 
     smile_levels = []
     for t in [-8, -10, -15, -20, -25, -30]:
@@ -586,7 +663,10 @@ def compute_sop(stocks: dict) -> dict:
         return "active" if not above else "standby"
 
     def s05():
-        if (len(l3) >= 3 and all(p >= 3 for p in l3)) or d0050 >= 5:
+        strong = (len(l3) >= 3 and all(p >= 3 for p in l3)) or d0050 >= 5
+        if strong and bearish_div:
+            return "watch"   # 頂部背離降級：暫緩全力壓正2
+        if strong:
             return "alert"
         if p0050 >= 3 and above:
             return "watch"
@@ -597,6 +677,9 @@ def compute_sop(stocks: dict) -> dict:
     macd_txt = {"golden": "金叉↑", "dead": "死叉↓"}.get(
         macd_cross or "", "多頭" if macd_trend == "bull" else "空頭" if macd_trend == "bear" else "-"
     )
+    # 背離標記（SOP desc 用）
+    div04_txt = "　底部背離✓" if bullish_div else ""
+    div05_txt = "　⚠頂部背離" if bearish_div else ""
 
     return {
         "sop01": {
@@ -623,14 +706,14 @@ def compute_sop(stocks: dict) -> dict:
             "pct_from_ma":  round(p0050, 2),
             "smile_levels": smile_levels,
             "desc_rule": "線下只買原型；左側各5%，右側各2%；-30%冬眠",
-            "desc_val":  f"年線偏離：{p0050:+.2f}%　{rsi_txt}　{kd_txt}",
+            "desc_val":  f"年線偏離：{p0050:+.2f}%　{rsi_txt}　{kd_txt}{div04_txt}",
         },
         "sop05": {
             "name": "反攻號角", "status": s05(),
             "pct_from_ma":  round(p0050, 2),
             "daily_change": round(d0050, 2),
             "desc_rule": "站回年線+3%連3天 或 單日+5% → 全數壓正2",
-            "desc_val":  f"年線偏離：{p0050:+.2f}%　MACD {macd_txt}　{rsi_txt}",
+            "desc_val":  f"年線偏離：{p0050:+.2f}%　MACD {macd_txt}　{rsi_txt}{div05_txt}",
         },
     }
 
@@ -648,6 +731,9 @@ def check_alerts(stocks: dict, sop: dict) -> list[dict]:
     rsi        = tw.get("rsi")
     macd_cross = tw.get("macd_cross")
     above      = tw.get("above_ma200", True)
+    div        = tw.get("divergence") or {}
+    bearish_div = div.get("bearish", False)
+    bullish_div = div.get("bullish", False)
 
     # ── 原有 SOP 警報 ──
     if pqqq <= -10:
@@ -699,6 +785,17 @@ def check_alerts(stocks: dict, sop: dict) -> list[dict]:
         alerts.append({"type": "BUY", "code": "05", "ts": now_str,
             "title": "MACD 金叉反攻訊號",
             "msg": "0050 年線下出現 MACD 金叉，動能反轉，留意反攻號角確認"})
+
+    # ── 背離警報 ──
+    if bearish_div:
+        alerts.append({"type": "CRITICAL", "code": "DIV", "ts": now_str,
+            "title": "頂部背離警示（假突破風險）",
+            "msg": "0050 價格創新高但 RSI 未跟進，動能衰退，反攻號角暫緩加碼正2"})
+
+    if bullish_div and not above:
+        alerts.append({"type": "BUY", "code": "DIV", "ts": now_str,
+            "title": "底部背離確認（底部訊號）",
+            "msg": "0050 價格破低但 RSI 止穩，下跌動能枯竭，微笑佈局信心加強"})
 
     # ── VIX 警報 ──
     vix = _cache.get("vix")
