@@ -28,6 +28,7 @@
   --blue: #3b82f6;
   --blue-dim: rgba(59,130,246,.12);
   --cyan: #06b6d4;
+  --cyan-dim: rgba(6,182,212,.12);
   --accent: #7c3aed;
   --accent2: #a855f7;
 }
@@ -57,9 +58,7 @@ button { cursor: pointer; font-family: inherit; }
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(8px);
 }
-.topbar-brand {
-  display: flex; align-items: center; gap: 12px;
-}
+.topbar-brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark {
   width: 32px; height: 32px;
   background: linear-gradient(135deg, var(--accent) 0%, var(--cyan) 100%);
@@ -68,11 +67,9 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 14px; font-weight: 800; color: #fff; letter-spacing: -0.5px;
 }
 .brand-title { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
-.brand-sub { font-size: 11px; color: var(--txt3); font-weight: 400; margin-top: 1px; }
+.brand-sub   { font-size: 11px; color: var(--txt3); font-weight: 400; margin-top: 1px; }
 
-.topbar-meta {
-  display: flex; align-items: center; gap: 20px;
-}
+.topbar-meta { display: flex; align-items: center; gap: 20px; }
 .meta-pill {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 10px;
@@ -81,13 +78,10 @@ button { cursor: pointer; font-family: inherit; }
 }
 .pulse-dot {
   width: 6px; height: 6px; border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 6px var(--green);
+  background: var(--green); box-shadow: 0 0 6px var(--green);
   animation: pulse 2s infinite;
 }
-@keyframes pulse {
-  0%,100% { opacity: 1; } 50% { opacity: 0.3; }
-}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .btn {
@@ -96,15 +90,11 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 12px; font-weight: 500;
   transition: all .15s; border: 1px solid transparent;
 }
-.btn-ghost {
-  background: var(--bg2); border-color: var(--border); color: var(--txt1);
-}
+.btn-ghost   { background: var(--bg2); border-color: var(--border); color: var(--txt1); }
 .btn-ghost:hover { background: var(--bg3); }
-.btn-primary {
-  background: var(--accent); color: #fff; border-color: var(--accent);
-}
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .btn-primary:hover { background: var(--accent2); }
-.btn-icon { width: 14px; height: 14px; opacity: .7; }
+.btn-icon    { width: 14px; height: 14px; opacity: .7; }
 
 /* ─── Page layout ─────────────────────────────────────────────────────── */
 .page { padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; }
@@ -140,13 +130,13 @@ button { cursor: pointer; font-family: inherit; }
   display: flex; justify-content: space-between; align-items: flex-start;
   margin-bottom: 12px;
 }
-.scard-sym { font-size: 17px; font-weight: 800; letter-spacing: -0.5px; }
+.scard-sym  { font-size: 17px; font-weight: 800; letter-spacing: -0.5px; }
 .scard-name { font-size: 10px; color: var(--txt3); margin-top: 2px; font-weight: 400; }
-.scard-tag {
+.scard-tag  {
   font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
   padding: 2px 7px; border-radius: 10px;
 }
-.tag-above { background: var(--red-dim); color: var(--red); }
+.tag-above { background: var(--red-dim);   color: var(--red);   }
 .tag-below { background: var(--green-dim); color: var(--green); }
 
 .scard-price {
@@ -174,6 +164,19 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 11px; font-weight: 600;
 }
 
+/* indicator badge inside card */
+.ind-badge {
+  display: inline-block;
+  font-size: 9px; font-weight: 700; letter-spacing: .3px;
+  padding: 1px 5px; border-radius: 4px;
+}
+.ind-overbought { background: var(--red-dim);    color: var(--red);    }
+.ind-oversold   { background: var(--green-dim);  color: var(--green);  }
+.ind-golden     { background: var(--green-dim);  color: var(--green);  }
+.ind-dead       { background: var(--red-dim);    color: var(--red);    }
+.ind-bull       { background: var(--cyan-dim);   color: var(--cyan);   }
+.ind-bear       { background: rgba(255,255,255,.05); color: var(--txt3); }
+
 /* ─── Main content ────────────────────────────────────────────────────── */
 .content-row {
   display: grid;
@@ -183,19 +186,14 @@ button { cursor: pointer; font-family: inherit; }
 }
 
 /* ─── Panel base ──────────────────────────────────────────────────────── */
-.panel {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-}
+.panel { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
 }
 .panel-title { font-size: 13px; font-weight: 600; }
-.panel-body { padding: 16px 18px; }
+.panel-body  { padding: 16px 18px; }
 
 /* ─── Chart panel ─────────────────────────────────────────────────────── */
 .chart-tabs { display: flex; gap: 4px; }
@@ -204,49 +202,35 @@ button { cursor: pointer; font-family: inherit; }
   color: var(--txt2); padding: 4px 12px; border-radius: 6px;
   font-size: 11px; font-weight: 600; transition: all .15s;
 }
-.ctab.active {
-  background: var(--accent); border-color: var(--accent); color: #fff;
-}
+.ctab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ctab:hover:not(.active) { background: var(--bg3); }
 
-.chart-wrap { padding: 16px 18px 0; height: 300px; position: relative; }
-.chart-legend {
-  display: flex; gap: 16px;
-  padding: 10px 18px 14px;
-}
-.leg-item { display: flex; align-items: center; gap: 6px; }
-.leg-line { width: 20px; height: 2px; border-radius: 1px; }
-.leg-label { font-size: 10px; color: var(--txt2); }
+.chart-wrap   { padding: 16px 18px 0; height: 300px; position: relative; }
+.chart-legend { display: flex; gap: 16px; padding: 10px 18px 14px; }
+.leg-item     { display: flex; align-items: center; gap: 6px; }
+.leg-line     { width: 20px; height: 2px; border-radius: 1px; }
+.leg-label    { font-size: 10px; color: var(--txt2); }
 
 /* ─── SOP panel ───────────────────────────────────────────────────────── */
 .sop-stack { display: flex; flex-direction: column; gap: 10px; }
-
-.sop-item {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-}
+.sop-item  { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .sop-item-hd {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
 .sop-num-title { display: flex; align-items: center; gap: 8px; }
-.sop-num {
-  font-size: 9px; font-weight: 800; color: var(--txt3);
-  letter-spacing: .5px;
-}
+.sop-num  { font-size: 9px; font-weight: 800; color: var(--txt3); letter-spacing: .5px; }
 .sop-name { font-size: 13px; font-weight: 700; }
 .badge {
   font-size: 9px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .4px; padding: 2px 7px; border-radius: 10px;
 }
-.badge-normal  { background: var(--green-dim);  color: var(--green); }
-.badge-watch   { background: var(--yellow-dim); color: var(--yellow); }
-.badge-alert   { background: var(--red-dim);    color: var(--red); }
-.badge-active  { background: var(--blue-dim);   color: var(--blue); }
-.badge-standby { background: rgba(255,255,255,.05); color: var(--txt3); }
+.badge-normal  { background: var(--green-dim);        color: var(--green);  }
+.badge-watch   { background: var(--yellow-dim);       color: var(--yellow); }
+.badge-alert   { background: var(--red-dim);          color: var(--red);    }
+.badge-active  { background: var(--blue-dim);         color: var(--blue);   }
+.badge-standby { background: rgba(255,255,255,.05);   color: var(--txt3);   }
 
 .sop-item-bd { padding: 10px 14px; }
 .sop-rule { font-size: 10px; color: var(--txt3); margin-bottom: 5px; line-height: 1.4; }
@@ -255,70 +239,68 @@ button { cursor: pointer; font-family: inherit; }
 /* ─── Bottom row ──────────────────────────────────────────────────────── */
 .bottom-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 18px;
 }
 
 /* ─── Alert list ──────────────────────────────────────────────────────── */
-.alert-scroll { max-height: 220px; overflow-y: auto; }
+.alert-scroll { max-height: 260px; overflow-y: auto; }
 .alert-row {
   display: flex; align-items: flex-start; gap: 10px;
   padding: 10px 18px;
   border-bottom: 1px solid var(--border);
 }
 .alert-row:last-child { border-bottom: none; }
-.adot {
-  width: 7px; height: 7px; border-radius: 50%;
-  margin-top: 5px; flex-shrink: 0;
-}
-.adot-crit { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+.adot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.adot-crit { background: var(--red);   box-shadow: 0 0 6px var(--red);   }
 .adot-buy  { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .adot-info { background: var(--blue);  }
 .alert-ttl { font-size: 12px; font-weight: 600; }
 .alert-msg { font-size: 10px; color: var(--txt2); margin-top: 2px; line-height: 1.4; }
 .alert-ts  { font-size: 9px;  color: var(--txt3); margin-top: 3px; font-variant-numeric: tabular-nums; }
-.empty-box {
-  padding: 28px; text-align: center;
-  color: var(--txt3); font-size: 11px;
-}
+.empty-box { padding: 28px; text-align: center; color: var(--txt3); font-size: 11px; }
 
 /* ─── Smile detail ────────────────────────────────────────────────────── */
-.smile-header {
-  font-size: 11px; color: var(--txt2);
-  margin-bottom: 12px;
-}
-.smile-grid { display: flex; flex-direction: column; gap: 6px; }
-.smile-row { display: flex; align-items: center; gap: 10px; }
+.smile-header { font-size: 11px; color: var(--txt2); margin-bottom: 12px; }
+.smile-grid   { display: flex; flex-direction: column; gap: 6px; }
+.smile-row    { display: flex; align-items: center; gap: 10px; }
 .smile-thr {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px; font-weight: 600;
   width: 34px; text-align: right; color: var(--txt2);
 }
-.smile-track {
-  flex: 1; height: 5px;
-  background: var(--bg3); border-radius: 3px; overflow: hidden;
-}
-.smile-fill {
-  height: 100%; border-radius: 3px;
-  background: var(--border2);
-  transition: background .3s, width .4s;
-}
+.smile-track { flex: 1; height: 5px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+.smile-fill  { height: 100%; border-radius: 3px; background: var(--border2); transition: background .3s, width .4s; }
 .smile-fill.hit { background: var(--red); }
 .smile-price-lbl {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px; color: var(--txt3); width: 52px;
 }
-.smile-state {
-  font-size: 9px; width: 36px; text-align: right; font-weight: 700;
-}
+.smile-state { font-size: 9px; width: 36px; text-align: right; font-weight: 700; }
 .smile-foot {
   margin-top: 12px; padding-top: 10px;
   border-top: 1px solid var(--border);
   font-size: 10px; color: var(--txt3); line-height: 1.6;
 }
 
+/* ─── Market Sentiment ────────────────────────────────────────────────── */
+.vix-bar-wrap {
+  height: 6px; background: var(--bg3); border-radius: 3px;
+  margin-top: 8px; overflow: hidden;
+}
+.vix-bar { height: 100%; border-radius: 3px; transition: width .5s, background .3s; }
+.vix-scale {
+  display: flex; justify-content: space-between;
+  font-size: 9px; color: var(--txt3); margin-top: 3px;
+}
+.fn-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-top: 6px; margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
 /* ─── Spinner ─────────────────────────────────────────────────────────── */
-.sk { display: flex; justify-content: center; padding: 28px; }
+.sk   { display: flex; justify-content: center; padding: 28px; }
 .spin {
   width: 20px; height: 20px;
   border: 2px solid var(--border); border-top-color: var(--cyan);
@@ -336,18 +318,17 @@ button { cursor: pointer; font-family: inherit; }
   transform: translateY(20px); opacity: 0;
   transition: all .2s; pointer-events: none;
 }
-.toast.show {
-  transform: translateY(0); opacity: 1;
-}
+.toast.show { transform: translateY(0); opacity: 1; }
 
 /* ─── Responsive ──────────────────────────────────────────────────────── */
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   .stock-grid  { grid-template-columns: repeat(2, 1fr); }
   .content-row { grid-template-columns: 1fr; }
-  .bottom-row  { grid-template-columns: 1fr; }
+  .bottom-row  { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 768px) {
-  .stock-grid  { grid-template-columns: 1fr; }
+  .stock-grid { grid-template-columns: 1fr; }
+  .bottom-row { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -408,12 +389,12 @@ button { cursor: pointer; font-family: inherit; }
       <div class="panel-header">
         <span class="panel-title">收盤價 &amp; 移動平均線</span>
         <div class="chart-tabs" id="chartTabs">
-          <button class="ctab active" data-sym="0050"   onclick="switchChart(this,'0050')">0050</button>
-          <button class="ctab"        data-sym="QQQ"    onclick="switchChart(this,'QQQ')">QQQ</button>
-          <button class="ctab"        data-sym="00631L" onclick="switchChart(this,'00631L')">00631L</button>
-          <button class="ctab"        data-sym="QLD"    onclick="switchChart(this,'QLD')">QLD</button>
-          <button class="ctab"        data-sym="00662"  onclick="switchChart(this,'00662')">00662</button>
-          <button class="ctab"        data-sym="00865B" onclick="switchChart(this,'00865B')">00865B</button>
+          <button class="ctab active" onclick="switchChart(this,'0050')">0050</button>
+          <button class="ctab"        onclick="switchChart(this,'QQQ')">QQQ</button>
+          <button class="ctab"        onclick="switchChart(this,'00631L')">00631L</button>
+          <button class="ctab"        onclick="switchChart(this,'QLD')">QLD</button>
+          <button class="ctab"        onclick="switchChart(this,'00662')">00662</button>
+          <button class="ctab"        onclick="switchChart(this,'00865B')">00865B</button>
         </div>
       </div>
       <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
@@ -423,7 +404,7 @@ button { cursor: pointer; font-family: inherit; }
           <span class="leg-label">收盤價</span>
         </div>
         <div class="leg-item">
-          <div class="leg-line" style="background:var(--yellow); border-top: 2px dashed var(--yellow); height:0;width:20px;"></div>
+          <div class="leg-line" style="background:var(--yellow); border-top:2px dashed var(--yellow); height:0; width:20px;"></div>
           <span class="leg-label">200MA 年線</span>
         </div>
         <div class="leg-item">
@@ -463,6 +444,17 @@ button { cursor: pointer; font-family: inherit; }
       </div>
     </div>
 
+    <!-- Market Sentiment -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">市場情緒</span>
+        <span id="vixBadge" style="font-size:10px;color:var(--txt3)">VIX -</span>
+      </div>
+      <div class="panel-body" id="sentimentPanel">
+        <div class="sk"><div class="spin"></div></div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -471,9 +463,9 @@ button { cursor: pointer; font-family: inherit; }
 
 <script>
 /* ─── State ───────────────────────────────────────────────────────────────── */
-let chart     = null;
-let curSym    = '0050';
-let state     = null;   // last API response
+let chart  = null;
+let curSym = '0050';
+let state  = null;
 
 /* ─── Clock ───────────────────────────────────────────────────────────────── */
 function tickClock() {
@@ -483,9 +475,18 @@ function tickClock() {
 setInterval(tickClock, 1000); tickClock();
 
 /* ─── Utils ───────────────────────────────────────────────────────────────── */
-const f = (n, d=2) => n == null ? '-' : Number(n).toFixed(d);
-const fc = n => n == null ? '-' : (n>=0?'+':'')+Number(n).toFixed(2)+'%';
+const f   = (n, d=2) => n == null ? '-' : Number(n).toFixed(d);
+const fc  = n => n == null ? '-' : (n>=0?'+':'')+Number(n).toFixed(2)+'%';
 const cls = n => n == null ? 'neu' : n>0?'pos':n<0?'neg':'neu';
+
+function fyi(v) {
+  if (v == null) return '-';
+  const abs  = Math.abs(v);
+  const sign = v >= 0 ? '+' : '-';
+  if (abs >= 1e8)  return sign + (abs/1e8).toFixed(1)  + '億';
+  if (abs >= 1e4)  return sign + (abs/1e4).toFixed(0)  + '萬';
+  return sign + abs.toFixed(0);
+}
 
 function toast(msg, ok=true) {
   const el = document.getElementById('toast');
@@ -513,8 +514,7 @@ async function loadData() {
 
 async function forceRefresh() {
   const btn = document.getElementById('refreshBtn');
-  btn.disabled = true;
-  btn.textContent = '載入中…';
+  btn.disabled = true; btn.textContent = '載入中…';
   try {
     await fetch('/api/refresh', {method:'POST'});
     await loadData();
@@ -530,8 +530,7 @@ async function forceRefresh() {
 async function testNotify() {
   try {
     const r = await fetch('/api/notify', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({message:'[測試] 台美股SOP監控系統正常運作，LINE通知設定成功！'})
     });
     const d = await r.json();
@@ -550,6 +549,7 @@ function render() {
   renderAlerts(state.alerts, state.alert_history);
   renderSmile(state.sop);
   renderChart(curSym);
+  renderMarketSentiment(state.vix, state.foreign_net);
 }
 
 /* ── Stock grid ── */
@@ -560,15 +560,44 @@ const NAMES = {
 };
 const ORDER = ['0050','QQQ','00631L','QLD','00662','00865B'];
 
+function rsiColor(v) {
+  if (v == null) return 'var(--txt2)';
+  if (v > 70)   return 'var(--red)';
+  if (v < 30)   return 'var(--green)';
+  return 'var(--txt2)';
+}
+function rsiLabel(v) {
+  if (v == null) return '';
+  if (v > 80)   return '<span class="ind-badge ind-overbought">強烈超買</span>';
+  if (v > 70)   return '<span class="ind-badge ind-overbought">超買</span>';
+  if (v < 20)   return '<span class="ind-badge ind-oversold">強烈超賣</span>';
+  if (v < 30)   return '<span class="ind-badge ind-oversold">超賣</span>';
+  return '';
+}
+function macdBadge(cross, trend) {
+  if (cross === 'golden') return '<span class="ind-badge ind-golden">金叉 ↑</span>';
+  if (cross === 'dead')   return '<span class="ind-badge ind-dead">死叉 ↓</span>';
+  if (trend === 'bull')   return '<span class="ind-badge ind-bull">多頭</span>';
+  if (trend === 'bear')   return '<span class="ind-badge ind-bear">空頭</span>';
+  return '-';
+}
+function kdColor(k) {
+  if (k == null) return 'var(--txt2)';
+  if (k > 80)   return 'var(--red)';
+  if (k < 20)   return 'var(--green)';
+  return 'var(--txt2)';
+}
+
 function renderStockGrid(stocks) {
   if (!stocks) return;
   document.getElementById('stockGrid').innerHTML = ORDER.map(sym => {
     const s = stocks[sym];
     if (!s) return `<div class="scard flat"><div class="sk"><div class="spin"></div></div></div>`;
-    const dc = s.daily_change;
+    const dc     = s.daily_change;
     const cardCls = dc > 0 ? 'up' : dc < 0 ? 'down' : 'flat';
     const tagCls  = s.above_ma200 ? 'tag-above' : 'tag-below';
     const tagTxt  = s.above_ma200 ? '年線上' : '年線下';
+
     return `
     <div class="scard ${cardCls}">
       <div class="scard-top">
@@ -593,6 +622,21 @@ function renderStockGrid(stocks) {
         <div class="metric-row">
           <span class="metric-lbl">50MA</span>
           <span class="metric-val">${f(s.ma50)}</span>
+        </div>
+      </div>
+      <hr class="scard-divider">
+      <div class="scard-metrics">
+        <div class="metric-row">
+          <span class="metric-lbl">RSI 14&ensp;${rsiLabel(s.rsi)}</span>
+          <span class="metric-val" style="color:${rsiColor(s.rsi)}">${s.rsi != null ? f(s.rsi,1) : '-'}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">K / D (9)</span>
+          <span class="metric-val" style="color:${kdColor(s.k_val)}">${(s.k_val!=null&&s.d_val!=null)?f(s.k_val,1)+' / '+f(s.d_val,1):'-'}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">MACD</span>
+          <span class="metric-val">${macdBadge(s.macd_cross, s.macd_trend)}</span>
         </div>
       </div>
     </div>`;
@@ -669,7 +713,7 @@ function renderSmile(sop) {
   if (!s04?.smile_levels) return;
 
   const p = s04.pct_from_ma;
-  const html = `
+  document.getElementById('smileDetail').innerHTML = `
     <div class="smile-header">
       目前 0050 偏離年線：<strong class="${cls(p)}">${fc(p)}</strong>
     </div>
@@ -688,7 +732,91 @@ function renderSmile(sop) {
       左側各 5% 買入 &nbsp;|&nbsp; 右側（反彈後）各 2% 買入<br>
       跌破 -30% 進入冬眠，停止加碼
     </div>`;
-  document.getElementById('smileDetail').innerHTML = html;
+}
+
+/* ── Market Sentiment ── */
+function renderMarketSentiment(vix, fn) {
+  const panel = document.getElementById('sentimentPanel');
+  const badge = document.getElementById('vixBadge');
+  if (!panel) return;
+
+  let html = '';
+
+  /* VIX section */
+  if (vix) {
+    const vp = vix.price;
+    const vixBarColor = vp > 30 ? 'var(--red)' : vp > 20 ? 'var(--yellow)' : 'var(--green)';
+    const vixTextColor = vp > 30 ? 'var(--red)' : vp > 20 ? 'var(--yellow)' : 'var(--txt2)';
+    const vixLevel = vp > 40 ? '極度恐慌' : vp > 30 ? '高度恐慌' : vp > 20 ? '市場偏緊' : vp < 13 ? '過度樂觀' : '正常';
+    const barW = Math.min(vp / 50 * 100, 100).toFixed(1);
+
+    badge.textContent = `VIX ${vp}`;
+    badge.style.color = vixTextColor;
+
+    html += `
+    <div style="margin-bottom:16px">
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;font-weight:600;letter-spacing:.3px">VIX 恐慌指數</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;color:${vixTextColor}">${vp}</span>
+        <span style="font-size:10px;color:${vixTextColor};font-weight:600">${vixLevel}</span>
+      </div>
+      <div class="metric-row" style="margin-bottom:6px">
+        <span class="metric-lbl">今日變動</span>
+        <span class="metric-val ${cls(vix.daily_change)}">${fc(vix.daily_change)}</span>
+      </div>
+      <div class="vix-bar-wrap">
+        <div class="vix-bar" style="width:${barW}%;background:${vixBarColor}"></div>
+      </div>
+      <div class="vix-scale">
+        <span>低恐慌&lt;15</span><span>警戒&gt;20</span><span>極恐&gt;30</span><span>50</span>
+      </div>
+    </div>
+    <hr class="scard-divider">`;
+  } else {
+    badge.textContent = 'VIX -';
+  }
+
+  /* 外資買賣超 section */
+  if (fn) {
+    const foreign = fn.foreign ?? null;
+    const trust   = fn.trust   ?? null;
+    const dealer  = fn.dealer  ?? null;
+    const total   = (foreign != null && trust != null && dealer != null)
+                    ? foreign + trust + dealer : null;
+    const dateStr = fn.date ? `<span style="font-size:9px;color:var(--txt3);margin-left:6px">${fn.date}</span>` : '';
+
+    html += `
+    <div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:10px;font-weight:600;letter-spacing:.3px">
+        三大法人買賣超${dateStr}
+      </div>
+      <div class="scard-metrics">
+        <div class="metric-row">
+          <span class="metric-lbl">外資及陸資</span>
+          <span class="metric-val" style="color:${foreign==null?'var(--txt3)':foreign>=0?'var(--red)':'var(--green)'}">${fyi(foreign)}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">投信</span>
+          <span class="metric-val" style="color:${trust==null?'var(--txt3)':trust>=0?'var(--red)':'var(--green)'}">${fyi(trust)}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">自營商</span>
+          <span class="metric-val" style="color:${dealer==null?'var(--txt3)':dealer>=0?'var(--red)':'var(--green)'}">${fyi(dealer)}</span>
+        </div>
+        ${total != null ? `
+        <div class="fn-total-row">
+          <span class="metric-lbl" style="font-weight:600;color:var(--txt2)">三大合計</span>
+          <span class="metric-val" style="font-size:13px;color:${total>=0?'var(--red)':'var(--green)'}">${fyi(total)}</span>
+        </div>` : ''}
+      </div>
+    </div>`;
+  } else if (!vix) {
+    html = '<div class="empty-box">資料載入中…</div>';
+  } else {
+    html += '<div style="font-size:10px;color:var(--txt3);margin-top:8px">外資資料尚未載入或市場休市</div>';
+  }
+
+  panel.innerHTML = html;
 }
 
 /* ── Chart ── */
@@ -706,7 +834,6 @@ function renderChart(sym) {
   const ctx = document.getElementById('priceChart').getContext('2d');
   if (chart) chart.destroy();
 
-  // Background gradient
   const grad = ctx.createLinearGradient(0,0,0,300);
   grad.addColorStop(0,'rgba(6,182,212,.15)');
   grad.addColorStop(1,'rgba(6,182,212,0)');
@@ -717,39 +844,19 @@ function renderChart(sym) {
       labels: c.dates,
       datasets: [
         {
-          label: '收盤價',
-          data: c.prices,
-          borderColor: '#06b6d4',
-          backgroundColor: grad,
-          borderWidth: 1.5,
-          pointRadius: 0,
-          fill: true,
-          tension: 0.05,
-          order: 3,
+          label: '收盤價', data: c.prices,
+          borderColor: '#06b6d4', backgroundColor: grad,
+          borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.05, order: 3,
         },
         {
-          label: '200MA 年線',
-          data: c.ma200,
-          borderColor: '#eab308',
-          backgroundColor: 'transparent',
-          borderWidth: 2,
-          borderDash: [6,3],
-          pointRadius: 0,
-          fill: false,
-          tension: 0.05,
-          order: 1,
+          label: '200MA 年線', data: c.ma200,
+          borderColor: '#eab308', backgroundColor: 'transparent',
+          borderWidth: 2, borderDash: [6,3], pointRadius: 0, fill: false, tension: 0.05, order: 1,
         },
         {
-          label: '50MA',
-          data: c.ma50,
-          borderColor: 'rgba(239,68,68,.6)',
-          backgroundColor: 'transparent',
-          borderWidth: 1.5,
-          borderDash: [3,2],
-          pointRadius: 0,
-          fill: false,
-          tension: 0.05,
-          order: 2,
+          label: '50MA', data: c.ma50,
+          borderColor: 'rgba(239,68,68,.6)', backgroundColor: 'transparent',
+          borderWidth: 1.5, borderDash: [3,2], pointRadius: 0, fill: false, tension: 0.05, order: 2,
         },
       ]
     },
@@ -760,10 +867,8 @@ function renderChart(sym) {
         legend: {display: false},
         tooltip: {
           mode: 'index', intersect: false,
-          backgroundColor: '#1c2230',
-          borderColor: '#21283a', borderWidth: 1,
-          titleColor: '#e2e8f4',  bodyColor: '#8896a9',
-          padding: 10,
+          backgroundColor: '#1c2230', borderColor: '#21283a', borderWidth: 1,
+          titleColor: '#e2e8f4', bodyColor: '#8896a9', padding: 10,
           callbacks: {
             title: items => items[0].label,
             label: item => ` ${item.dataset.label}: ${item.parsed.y != null ? item.parsed.y.toFixed(2) : 'N/A'}`,
@@ -772,18 +877,13 @@ function renderChart(sym) {
       },
       scales: {
         x: {
-          grid: {color: 'rgba(255,255,255,.04)', drawBorder: false},
-          ticks: {
-            color: '#55657a', maxTicksLimit: 7, font:{size:10},
-            maxRotation: 0,
-          }
+          grid: {color:'rgba(255,255,255,.04)', drawBorder:false},
+          ticks: {color:'#55657a', maxTicksLimit:7, font:{size:10}, maxRotation:0}
         },
         y: {
           position: 'right',
-          grid: {color: 'rgba(255,255,255,.04)', drawBorder: false},
-          ticks: {
-            color: '#55657a', font:{size:10, family:"'JetBrains Mono', monospace"},
-          }
+          grid: {color:'rgba(255,255,255,.04)', drawBorder:false},
+          ticks: {color:'#55657a', font:{size:10, family:"'JetBrains Mono', monospace"}}
         }
       },
       interaction: {mode:'nearest', axis:'x', intersect:false},
@@ -793,7 +893,7 @@ function renderChart(sym) {
 
 /* ─── Init ────────────────────────────────────────────────────────────────── */
 loadData();
-setInterval(loadData, 5 * 60 * 1000); // auto-refresh every 5 min
+setInterval(loadData, 5 * 60 * 1000);
 </script>
 </body>
 </html>

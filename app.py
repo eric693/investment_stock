@@ -15,30 +15,27 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-LINE_TOKEN  = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+LINE_TOKEN    = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_USER_IDS = [uid.strip() for uid in os.environ.get("LINE_USER_ID", "").split(",") if uid.strip()]
-TD_API_KEY  = os.environ.get("TWELVEDATA_API_KEY", "")    # US stocks (free plan)
-AV_API_KEY  = os.environ.get("ALPHAVANTAGE_API_KEY", "")  # TW stock history
+TD_API_KEY    = os.environ.get("TWELVEDATA_API_KEY", "")
+AV_API_KEY    = os.environ.get("ALPHAVANTAGE_API_KEY", "")
 TW_TZ = pytz.timezone("Asia/Taipei")
 
-# Price: every 1h  | History (MA): every 12h
 PRICE_TTL = int(os.environ.get("PRICE_CACHE_SECONDS", "3600"))
 HIST_TTL  = int(os.environ.get("HIST_CACHE_SECONDS",  "43200"))
 
 TD_BASE = "https://api.twelvedata.com"
 AV_BASE = "https://www.alphavantage.co/query"
 
-# Taiwan stocks — TWSE real-time price + Alpha Vantage daily history
 TW_SYMBOLS = {
     "0050":   "0050.TW",
     "00631L": "00631L.TW",
     "00662":  "00662.TW",
     "00865B": "00865B.TW",
 }
-# US stocks — Twelve Data (free plan supports US exchanges)
 US_SYMBOLS = {
     "QQQ": ("QQQ", "NASDAQ"),
-    "QLD": ("QLD", ""),       # let TD auto-detect exchange
+    "QLD": ("QLD", ""),
 }
 SYMBOL_NAMES = {
     "0050":   "元大台灣50",
@@ -51,21 +48,51 @@ SYMBOL_NAMES = {
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
 _cache = {
-    "stocks":     {},
-    "histories":  {},
-    "hist_ts":    0.0,
-    "price_ts":   0.0,
-    "refreshing": False,
+    "stocks":      {},
+    "histories":   {},
+    "hist_ts":     0.0,
+    "price_ts":    0.0,
+    "refreshing":  False,
+    "vix":         None,
+    "foreign_net": None,
 }
 _refresh_lock = threading.Lock()
 alert_history: list = []
-_line_users: dict = {}   # uid -> {last_msg, last_seen}
+_line_users: dict = {}
 
 
-# ─── Taiwan stock helpers (TWSE + Alpha Vantage) ──────────────────────────────
+# ─── Technical Indicators ─────────────────────────────────────────────────────
+def _calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    delta    = series.diff()
+    gain     = delta.clip(lower=0)
+    loss     = -delta.clip(upper=0)
+    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100 - 100 / (1 + rs)
+
+
+def _calc_macd(series: pd.Series):
+    ema12  = series.ewm(span=12, adjust=False).mean()
+    ema26  = series.ewm(span=26, adjust=False).mean()
+    macd   = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    hist   = macd - signal
+    return macd, signal, hist
+
+
+def _calc_kd(df: pd.DataFrame, period: int = 9):
+    lo  = df["Low"].rolling(period).min()
+    hi  = df["High"].rolling(period).max()
+    rsv = (df["Close"] - lo) / (hi - lo).replace(0, np.nan) * 100
+    rsv = rsv.fillna(50)
+    k   = rsv.ewm(com=2, adjust=False).mean()   # alpha=1/3 smoothing
+    d   = k.ewm(com=2, adjust=False).mean()
+    return k, d
+
+
+# ─── Taiwan stock helpers ─────────────────────────────────────────────────────
 def _fetch_tw_quotes() -> dict:
-    """Batch-fetch all TW real-time prices from TWSE MIS API (no auth needed).
-    Sends both tse_ and otc_ prefixes so ETFs on either board are found."""
     parts = []
     for s in TW_SYMBOLS:
         parts.append(f"tse_{s.lower()}.tw")
@@ -88,7 +115,7 @@ def _fetch_tw_quotes() -> dict:
             if prev is None:
                 continue
             if price is None:
-                price = prev  # market closed — use prev close
+                price = prev
             result[code] = {
                 "price":          price,
                 "prev_close":     prev,
@@ -103,7 +130,6 @@ def _fetch_tw_quotes() -> dict:
 
 
 def _fetch_twse_history(stock_no: str, months: int = 14) -> pd.DataFrame | None:
-    """Fetch TW stock history from TWSE official monthly API (free, no auth)."""
     from datetime import date
     rows = []
     today = date.today()
@@ -127,10 +153,15 @@ def _fetch_twse_history(stock_no: str, months: int = 14) -> pd.DataFrame | None:
                 close_str = row[6].replace(",", "")
                 if close_str in ("--", ""):
                     continue
-                parts = row[0].split("/")
+                high_str = row[4].replace(",", "")
+                low_str  = row[5].replace(",", "")
+                parts_d  = row[0].split("/")
+                close_f  = float(close_str)
                 rows.append({
-                    "date":  f"{int(parts[0]) + 1911}-{parts[1]}-{parts[2]}",
-                    "Close": float(close_str),
+                    "date":  f"{int(parts_d[0]) + 1911}-{parts_d[1]}-{parts_d[2]}",
+                    "Close": close_f,
+                    "High":  float(high_str) if high_str not in ("--", "") else close_f,
+                    "Low":   float(low_str)  if low_str  not in ("--", "") else close_f,
                 })
             time.sleep(0.3)
         except Exception as exc:
@@ -180,14 +211,15 @@ def _fetch_td_history(sym: str, exchange: str) -> pd.DataFrame | None:
     df.index = pd.to_datetime(df["datetime"])
     df = df.sort_index()
     df["Close"] = df["close"].astype(float)
-    df["MA200"]  = df["Close"].rolling(200).mean()
-    df["MA50"]   = df["Close"].rolling(50).mean()
+    df["High"]  = df["high"].astype(float)
+    df["Low"]   = df["low"].astype(float)
+    df["MA200"] = df["Close"].rolling(200).mean()
+    df["MA50"]  = df["Close"].rolling(50).mean()
     logger.info("TD history fetched %s (%d rows)", sym, len(df))
     return df
 
 
 def _fetch_yahoo_history(ticker: str) -> pd.DataFrame | None:
-    """Fallback: fetch daily history from Yahoo Finance (no auth needed)."""
     try:
         resp = requests.get(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
@@ -195,18 +227,27 @@ def _fetch_yahoo_history(ticker: str) -> pd.DataFrame | None:
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=20,
         )
-        data = resp.json()
+        data   = resp.json()
         result = data.get("chart", {}).get("result", [])
         if not result:
             logger.warning("Yahoo history empty for %s", ticker)
             return None
-        r = result[0]
+        r          = result[0]
         timestamps = r.get("timestamp", [])
-        closes = r.get("indicators", {}).get("quote", [{}])[0].get("close", [])
-        rows = [
-            {"date": pd.Timestamp(ts, unit="s").strftime("%Y-%m-%d"), "Close": float(c)}
-            for ts, c in zip(timestamps, closes) if c is not None
-        ]
+        quote      = r.get("indicators", {}).get("quote", [{}])[0]
+        closes     = quote.get("close", [])
+        highs      = quote.get("high",  [])
+        lows       = quote.get("low",   [])
+        rows = []
+        for ts, c, h, lo in zip(timestamps, closes, highs, lows):
+            if c is None:
+                continue
+            rows.append({
+                "date":  pd.Timestamp(ts, unit="s").strftime("%Y-%m-%d"),
+                "Close": float(c),
+                "High":  float(h)  if h  is not None else float(c),
+                "Low":   float(lo) if lo is not None else float(c),
+            })
         if not rows:
             return None
         df = pd.DataFrame(rows)
@@ -222,7 +263,6 @@ def _fetch_yahoo_history(ticker: str) -> pd.DataFrame | None:
 
 
 def _fetch_yahoo_quote(ticker: str) -> dict | None:
-    """Fallback: fetch real-time quote from Yahoo Finance."""
     try:
         resp = requests.get(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
@@ -230,11 +270,11 @@ def _fetch_yahoo_quote(ticker: str) -> dict | None:
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=15,
         )
-        data = resp.json()
+        data   = resp.json()
         result = data.get("chart", {}).get("result", [])
         if not result:
             return None
-        meta = result[0].get("meta", {})
+        meta  = result[0].get("meta", {})
         price = meta.get("regularMarketPrice") or meta.get("previousClose")
         prev  = meta.get("previousClose") or price
         if not price:
@@ -269,7 +309,69 @@ def _fetch_td_quote(sym: str, exchange: str) -> dict | None:
         return None
 
 
-# ─── Build entry (same regardless of data source) ────────────────────────────
+# ─── VIX & 外資買賣超 ──────────────────────────────────────────────────────────
+def _fetch_vix() -> dict | None:
+    try:
+        resp = requests.get(
+            "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX",
+            params={"interval": "1d", "range": "10d"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        data   = resp.json()
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            return None
+        meta  = result[0].get("meta", {})
+        price = meta.get("regularMarketPrice") or meta.get("previousClose")
+        prev  = meta.get("previousClose") or price
+        if not price:
+            return None
+        return {
+            "price":        round(float(price), 2),
+            "prev_close":   round(float(prev),  2),
+            "daily_change": round((float(price) - float(prev)) / float(prev) * 100, 2) if prev else 0.0,
+        }
+    except Exception as exc:
+        logger.error("VIX fetch error: %s", exc)
+        return None
+
+
+def _fetch_foreign_net() -> dict | None:
+    """Fetch 三大法人 daily net buy/sell from TWSE (unit: NT dollars)."""
+    try:
+        resp = requests.get(
+            "https://www.twse.com.tw/fund/BFI82U",
+            params={"response": "json", "type": "day"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("stat") != "OK":
+            logger.warning("TWSE BFI82U stat: %s", data.get("stat"))
+            return None
+        result = {"date": data.get("date", "")}
+        for row in data.get("data", []):
+            name    = row[0].strip()
+            net_str = row[3].replace(",", "").replace("+", "").strip()
+            try:
+                net = int(net_str)
+            except ValueError:
+                net = 0
+            if "外資及陸資" in name:
+                result["foreign"] = net
+            elif "投信" in name:
+                result["trust"] = net
+            elif name == "自營商":   # subtotal row, not 自行買賣 or 避險
+                result["dealer"] = net
+        logger.info("Foreign net fetched: %s", result)
+        return result
+    except Exception as exc:
+        logger.error("Foreign net fetch error: %s", exc)
+        return None
+
+
+# ─── Build stock entry ────────────────────────────────────────────────────────
 def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
     current   = quote["price"]
     prev      = quote["prev_close"]
@@ -289,6 +391,35 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
         except Exception:
             pass
 
+    # RSI 14
+    rsi_series = _calc_rsi(hist["Close"])
+    rsi = float(rsi_series.iloc[-1]) if not pd.isna(rsi_series.iloc[-1]) else None
+
+    # MACD 12/26/9
+    macd_s, signal_s, _ = _calc_macd(hist["Close"])
+    macd_val = float(macd_s.iloc[-1])   if not pd.isna(macd_s.iloc[-1])   else None
+    macd_sig = float(signal_s.iloc[-1]) if not pd.isna(signal_s.iloc[-1]) else None
+    macd_cross = None
+    macd_trend = None
+    if len(macd_s) >= 2 and macd_val is not None and macd_sig is not None:
+        curr_diff = macd_val - macd_sig
+        prev_macd = float(macd_s.iloc[-2])
+        prev_sig  = float(signal_s.iloc[-2])
+        prev_diff = prev_macd - prev_sig
+        macd_trend = "bull" if curr_diff > 0 else "bear"
+        if not np.isnan(prev_diff):
+            if prev_diff < 0 and curr_diff >= 0:
+                macd_cross = "golden"
+            elif prev_diff > 0 and curr_diff <= 0:
+                macd_cross = "dead"
+
+    # KD 9 (needs High/Low)
+    k_val = d_val = None
+    if "High" in hist.columns and "Low" in hist.columns:
+        k_s, d_s = _calc_kd(hist)
+        k_val = float(k_s.iloc[-1]) if not pd.isna(k_s.iloc[-1]) else None
+        d_val = float(d_s.iloc[-1]) if not pd.isna(d_s.iloc[-1]) else None
+
     ch = hist.tail(252)
     chart = {
         "dates":  ch.index.strftime("%Y-%m-%d").tolist(),
@@ -307,6 +438,13 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
         "pct_from_ma200": round(pct_from_ma200, 2) if pct_from_ma200 is not None else None,
         "above_ma200":    current > ma200 if ma200 else None,
         "last3_vs_ma":    [round(p, 2) for p in last3],
+        "rsi":            round(rsi, 2)      if rsi      is not None else None,
+        "macd_val":       round(macd_val, 4) if macd_val is not None else None,
+        "macd_signal":    round(macd_sig, 4) if macd_sig is not None else None,
+        "macd_cross":     macd_cross,
+        "macd_trend":     macd_trend,
+        "k_val":          round(k_val, 2) if k_val is not None else None,
+        "d_val":          round(d_val, 2) if d_val is not None else None,
         "chart":          chart,
     }
 
@@ -327,10 +465,18 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
         logger.info("Refreshing US histories (Twelve Data)…")
         for i, (name, (sym, exch)) in enumerate(US_SYMBOLS.items()):
             if i > 0:
-                time.sleep(8)   # TD free: 8 calls/min
+                time.sleep(8)
             hist = _fetch_td_history(sym, exch)
             if hist is not None:
                 _cache["histories"][name] = hist
+
+        logger.info("Refreshing VIX and 外資買賣超…")
+        vix = _fetch_vix()
+        if vix:
+            _cache["vix"] = vix
+        fn = _fetch_foreign_net()
+        if fn:
+            _cache["foreign_net"] = fn
 
         _cache["hist_ts"] = time.time()
 
@@ -354,6 +500,11 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             hist  = _cache["histories"].get(name)
             if quote and hist is not None:
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
+
+        # Refresh VIX on every price cycle too (fast, no auth needed)
+        vix = _fetch_vix()
+        if vix:
+            _cache["vix"] = vix
 
         _cache["price_ts"] = time.time()
 
@@ -392,8 +543,8 @@ def cached_data() -> dict:
 
 # ─── SOP logic ────────────────────────────────────────────────────────────────
 def compute_sop(stocks: dict) -> dict:
-    tw   = stocks.get("0050", {})
-    qqq  = stocks.get("QQQ",  {})
+    tw  = stocks.get("0050", {})
+    qqq = stocks.get("QQQ",  {})
 
     p0050 = tw.get("pct_from_ma200") or 0.0
     pqqq  = qqq.get("pct_from_ma200") or 0.0
@@ -402,6 +553,12 @@ def compute_sop(stocks: dict) -> dict:
     above = tw.get("above_ma200", True)
     ma200 = tw.get("ma200") or 0.0
     price = tw.get("price") or 0.0
+
+    rsi        = tw.get("rsi")
+    macd_cross = tw.get("macd_cross")
+    macd_trend = tw.get("macd_trend")
+    k_val      = tw.get("k_val")
+    d_val      = tw.get("d_val")
 
     smile_levels = []
     for t in [-8, -10, -15, -20, -25, -30]:
@@ -420,7 +577,8 @@ def compute_sop(stocks: dict) -> dict:
     def s03():
         if (len(l3) >= 3 and all(p <= -3 for p in l3)) or d0050 <= -5:
             return "alert"
-        if p0050 <= -3:
+        # MACD 死叉 or 空頭趨勢 加入 watch 條件
+        if p0050 <= -3 or macd_cross == "dead" or (macd_trend == "bear" and not above):
             return "watch"
         return "normal"
 
@@ -433,6 +591,12 @@ def compute_sop(stocks: dict) -> dict:
         if p0050 >= 3 and above:
             return "watch"
         return "standby"
+
+    rsi_txt  = f"RSI {rsi:.0f}" if rsi is not None else "RSI -"
+    kd_txt   = f"K {k_val:.0f}/D {d_val:.0f}" if k_val is not None else "KD -"
+    macd_txt = {"golden": "金叉↑", "dead": "死叉↓"}.get(
+        macd_cross or "", "多頭" if macd_trend == "bull" else "空頭" if macd_trend == "bear" else "-"
+    )
 
     return {
         "sop01": {
@@ -452,27 +616,27 @@ def compute_sop(stocks: dict) -> dict:
             "daily_change": round(d0050, 2),
             "last3":        l3,
             "desc_rule": "跌破年線-3%連3天，或單日-5% → 出清正2轉備戰現金",
-            "desc_val":  f"0050 日漲跌：{d0050:+.2f}%",
+            "desc_val":  f"0050 日漲跌：{d0050:+.2f}%　MACD {macd_txt}",
         },
         "sop04": {
             "name": "微笑佈局", "status": s04(),
             "pct_from_ma":  round(p0050, 2),
             "smile_levels": smile_levels,
             "desc_rule": "線下只買原型；左側各5%，右側各2%；-30%冬眠",
-            "desc_val":  f"0050 年線偏離：{p0050:+.2f}%",
+            "desc_val":  f"年線偏離：{p0050:+.2f}%　{rsi_txt}　{kd_txt}",
         },
         "sop05": {
             "name": "反攻號角", "status": s05(),
             "pct_from_ma":  round(p0050, 2),
             "daily_change": round(d0050, 2),
             "desc_rule": "站回年線+3%連3天 或 單日+5% → 全數壓正2",
-            "desc_val":  f"0050 年線偏離：{p0050:+.2f}%",
+            "desc_val":  f"年線偏離：{p0050:+.2f}%　MACD {macd_txt}　{rsi_txt}",
         },
     }
 
 
 def check_alerts(stocks: dict, sop: dict) -> list[dict]:
-    alerts = []
+    alerts  = []
     now_str = datetime.now(TW_TZ).isoformat()
     tw  = stocks.get("0050", {})
     qqq = stocks.get("QQQ",  {})
@@ -481,7 +645,11 @@ def check_alerts(stocks: dict, sop: dict) -> list[dict]:
     p0050 = tw.get("pct_from_ma200")  or 0.0
     d0050 = tw.get("daily_change")    or 0.0
     l3    = tw.get("last3_vs_ma", [])
+    rsi        = tw.get("rsi")
+    macd_cross = tw.get("macd_cross")
+    above      = tw.get("above_ma200", True)
 
+    # ── 原有 SOP 警報 ──
     if pqqq <= -10:
         alerts.append({"type": "CRITICAL", "code": "02", "ts": now_str,
             "title": "雙核雷達觸發",
@@ -497,12 +665,26 @@ def check_alerts(stocks: dict, sop: dict) -> list[dict]:
             "title": "撤退機制（單日暴跌）",
             "msg": f"0050 單日跌幅 {d0050:.1f}%（閾值 -5%），立刻出清正2轉備戰現金！"})
 
+    # ── MACD 警報 ──
+    if macd_cross == "dead":
+        alerts.append({"type": "CRITICAL", "code": "03", "ts": now_str,
+            "title": "MACD 死叉預警",
+            "msg": "0050 MACD 出現死叉，動能轉弱，搭配其他訊號注意撤退時機"})
+
+    # ── 微笑佈局買點 ──
     for lvl in sop.get("sop04", {}).get("smile_levels", []):
         if lvl["triggered"] and abs(p0050 - lvl["threshold"]) < 0.8:
             alerts.append({"type": "BUY", "code": "04", "ts": now_str,
                 "title": f"微笑佈局 {lvl['threshold']}% 買點",
                 "msg": f"0050 接近年線 {lvl['threshold']}% 位置（現 {p0050:.1f}%），左側佈局 5%"})
 
+    # ── RSI 超賣確認 ──
+    if rsi is not None and rsi < 30 and not above:
+        alerts.append({"type": "BUY", "code": "04", "ts": now_str,
+            "title": "RSI 超賣確認",
+            "msg": f"0050 RSI {rsi:.1f} 進入超賣區（< 30），搭配微笑佈局加碼訊號強化"})
+
+    # ── 反攻號角 ──
     if len(l3) >= 3 and all(p >= 3 for p in l3):
         alerts.append({"type": "BUY", "code": "05", "ts": now_str,
             "title": "反攻號角（連續3日）",
@@ -512,6 +694,26 @@ def check_alerts(stocks: dict, sop: dict) -> list[dict]:
         alerts.append({"type": "BUY", "code": "05", "ts": now_str,
             "title": "反攻號角（單日大漲）",
             "msg": f"0050 單日漲幅 {d0050:.1f}%（閾值 +5%），全數壓正2！"})
+
+    if macd_cross == "golden" and not above:
+        alerts.append({"type": "BUY", "code": "05", "ts": now_str,
+            "title": "MACD 金叉反攻訊號",
+            "msg": "0050 年線下出現 MACD 金叉，動能反轉，留意反攻號角確認"})
+
+    # ── VIX 警報 ──
+    vix = _cache.get("vix")
+    if vix and vix.get("price", 0) > 30:
+        alerts.append({"type": "CRITICAL", "code": "VX", "ts": now_str,
+            "title": "VIX 恐慌指數偏高",
+            "msg": f"VIX {vix['price']:.1f}（> 30），市場高波動期，正2槓桿風險加倍，請謹慎操作"})
+
+    # ── 外資大幅賣超 ──
+    fn = _cache.get("foreign_net")
+    if fn and fn.get("foreign") is not None and fn["foreign"] < -30_000_000_000:
+        sold_yi = abs(fn["foreign"]) / 1e8
+        alerts.append({"type": "CRITICAL", "code": "FN", "ts": now_str,
+            "title": "外資大幅賣超",
+            "msg": f"外資今日賣超約 {sold_yi:.0f} 億元，搭配年線訊號判斷是否撤退"})
 
     return alerts
 
@@ -563,6 +765,8 @@ def api_dashboard():
             "updated_at":    datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S"),
             "price_age":     int(time.time() - _cache["price_ts"]),
             "hist_age":      int(time.time() - _cache["hist_ts"]),
+            "vix":           _cache.get("vix"),
+            "foreign_net":   _cache.get("foreign_net"),
         })
     except Exception as exc:
         logger.exception("Dashboard error")
@@ -607,7 +811,7 @@ def _line_reply(reply_token: str, message: str):
 
 @app.route("/webhook", methods=["POST"])
 def line_webhook():
-    body = request.get_json(silent=True) or {}
+    body   = request.get_json(silent=True) or {}
     events = body.get("events", [])
     logger.info("Webhook received: %d event(s)", len(events))
     for event in events:
@@ -635,9 +839,9 @@ def line_webhook():
 @app.route("/api/line-users")
 def api_line_users():
     return jsonify({
-        "token_configured": bool(LINE_TOKEN),
+        "token_configured":      bool(LINE_TOKEN),
         "push_users_configured": LINE_USER_IDS,
-        "seen_users": _line_users,
+        "seen_users":            _line_users,
     })
 
 
