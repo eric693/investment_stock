@@ -165,8 +165,8 @@ def _calc_divergence(close: pd.Series, rsi: pd.Series,
 def _fetch_tw_quotes() -> dict:
     parts = []
     for s in TW_SYMBOLS:
-        parts.append(f"tse_{s.lower()}.tw")
-        parts.append(f"otc_{s.lower()}.tw")
+        parts.append(f"tse_{s}.tw")
+        parts.append(f"otc_{s}.tw")
     ex_ch = "|".join(parts)
     try:
         resp = requests.get(
@@ -345,11 +345,18 @@ def _fetch_yahoo_quote(ticker: str) -> dict | None:
         result = data.get("chart", {}).get("result", [])
         if not result:
             return None
-        meta  = result[0].get("meta", {})
-        price = meta.get("regularMarketPrice") or meta.get("previousClose")
-        prev  = meta.get("previousClose") or price
+        meta   = result[0].get("meta", {})
+        closes = result[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
+        closes = [c for c in closes if c is not None]
+        price  = meta.get("regularMarketPrice") or (closes[-1] if closes else None)
         if not price:
             return None
+        # Yahoo often omits previousClose for TW stocks — fall back to second-to-last close
+        prev = meta.get("previousClose")
+        if prev is None and len(closes) >= 2:
+            prev = closes[-2]
+        if prev is None:
+            prev = price
         return {
             "price":          float(price),
             "prev_close":     float(prev),
