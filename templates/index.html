@@ -343,6 +343,59 @@ button { cursor: pointer; font-family: inherit; }
   .stock-grid { grid-template-columns: 1fr; }
   .bottom-row { grid-template-columns: 1fr; }
 }
+
+/* ─── Cash Bot ────────────────────────────────────────────────────────── */
+.cb-slider {
+  -webkit-appearance:none;appearance:none;
+  width:130px;height:4px;border-radius:2px;background:var(--bg3);outline:none;cursor:pointer;
+}
+.cb-slider::-webkit-slider-thumb {
+  -webkit-appearance:none;appearance:none;
+  width:14px;height:14px;border-radius:50%;background:var(--cyan);cursor:pointer;
+  box-shadow:0 0 6px rgba(6,182,212,.5);
+}
+.cb-top-grid {
+  display:grid;grid-template-columns:1fr 1.2fr 1.8fr;gap:14px;margin-bottom:14px;
+}
+.cb-card {
+  background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;
+}
+.cb-card-title {
+  font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+  color:var(--txt3);margin-bottom:10px;
+}
+.cb-tier-name { font-size:20px;font-weight:800;letter-spacing:-.5px;line-height:1.2; }
+.cb-alloc-bar-wrap {
+  height:10px;background:var(--bg0);border-radius:5px;overflow:hidden;
+  margin:8px 0;border:1px solid var(--border);display:flex;
+}
+.cb-alloc-stock { height:100%;transition:width .5s,background .3s;border-radius:5px 0 0 5px; }
+.cb-alloc-cash  { height:100%;background:rgba(255,255,255,.04);flex:1; }
+.cb-action-box  { border-radius:8px;padding:12px 16px;border-left:3px solid; }
+.cb-action-hold   { background:rgba(34,197,94,.07);  border-color:var(--green); }
+.cb-action-reduce { background:rgba(239,68,68,.07);  border-color:var(--red);   }
+.cb-action-add    { background:rgba(59,130,246,.07); border-color:var(--blue);  }
+.cb-tiers-wrap { display:flex;flex-direction:column;gap:4px;margin-top:14px; }
+.cb-tiers-title {
+  font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;
+  color:var(--txt3);margin-bottom:6px;
+}
+.cb-tier-row {
+  display:flex;align-items:center;gap:10px;
+  padding:6px 10px;border-radius:7px;border:1px solid transparent;
+}
+.cb-tier-row.current { background:rgba(6,182,212,.09);border-color:rgba(6,182,212,.28); }
+.cb-tier-label { font-size:11px;font-weight:600;width:68px;flex-shrink:0; }
+.cb-tier-thr   { font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--txt3);width:54px;flex-shrink:0; }
+.cb-tier-bar   { flex:1;height:5px;background:var(--bg0);border-radius:3px;overflow:hidden; }
+.cb-tier-bar-fill { height:100%;border-radius:3px; }
+.cb-tier-pcts  { font-family:'JetBrains Mono',monospace;font-size:10px;width:64px;text-align:right;flex-shrink:0; }
+.cb-signal {
+  font-size:10px;color:var(--txt2);padding:6px 10px;background:var(--bg3);
+  border-radius:6px;border-left:2px solid var(--yellow);line-height:1.4;
+}
+@media (max-width:900px) { .cb-top-grid { grid-template-columns:1fr 1fr; } }
+@media (max-width:600px) { .cb-top-grid { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -433,6 +486,29 @@ button { cursor: pointer; font-family: inherit; }
     </div>
   </div>
 
+  <!-- Cash Bot Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">現金配置機器人</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">台股 0050 年線 · 機械式持倉管理</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:11px;color:var(--txt2)">持股基準</span>
+        <input class="cb-slider" type="range" id="cbSlider" min="10" max="100" step="5" value="80"
+               oninput="onCbSlider(this.value)">
+        <span id="cbBaseLabel" style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--cyan);min-width:36px">80%</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div id="cbMain"><div class="sk"><div class="spin"></div></div></div>
+      <div class="cb-tiers-wrap">
+        <div class="cb-tiers-title">配置分級對照表</div>
+        <div id="cbTiers"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Bottom row -->
   <div class="bottom-row">
 
@@ -476,9 +552,10 @@ button { cursor: pointer; font-family: inherit; }
 
 <script>
 /* ─── State ───────────────────────────────────────────────────────────────── */
-let chart  = null;
-let curSym = '0050';
-let state  = null;
+let chart     = null;
+let curSym    = '0050';
+let state     = null;
+let cbBasePct = parseInt(localStorage.getItem('cbBasePct') || '80');
 
 /* ─── Clock ───────────────────────────────────────────────────────────────── */
 function tickClock() {
@@ -563,6 +640,7 @@ function render() {
   renderSmile(state.sop);
   renderChart(curSym);
   renderMarketSentiment(state.vix, state.foreign_net);
+  renderCashBot(cbBasePct);
 }
 
 /* ── Stock grid ── */
@@ -921,7 +999,167 @@ function renderChart(sym) {
   });
 }
 
+/* ─── Cash Bot ────────────────────────────────────────────────────────────── */
+const CB_TIERS = [
+  { threshold:   3, name: '多頭強勢', factor: 1.00,  state: 'bull'    },
+  { threshold:   0, name: '年線整理', factor: 0.90,  state: 'neutral' },
+  { threshold:  -3, name: '略低年線', factor: 0.80,  state: 'neutral' },
+  { threshold:  -8, name: '中度修正', factor: 0.60,  state: 'caution' },
+  { threshold: -15, name: '大幅下跌', factor: 0.40,  state: 'bear'    },
+  { threshold: -20, name: '深度下跌', factor: 0.25,  state: 'bear'    },
+  { threshold: -25, name: '極度下跌', factor: 0.125, state: 'danger'  },
+  { threshold: -999,name: '冬眠模式', factor: 0.05,  state: 'danger'  },
+];
+const CB_CLR = { bull:'var(--green)', neutral:'var(--yellow)', caution:'#fb923c', bear:'var(--red)', danger:'#dc2626' };
+
+function computeCashBot(basePct) {
+  if (!state?.stocks?.['0050']) return null;
+  const tw    = state.stocks['0050'];
+  const pct   = tw.pct_from_ma200 || 0;
+  const dc    = tw.daily_change    || 0;
+  const rsi   = tw.rsi;
+  const above = tw.above_ma200;
+  const div   = tw.divergence || {};
+  const vix   = state.vix;
+
+  let tier = CB_TIERS[CB_TIERS.length - 1];
+  for (const t of CB_TIERS) { if (pct >= t.threshold) { tier = t; break; } }
+
+  let recStock = Math.min(basePct, Math.round(basePct * tier.factor));
+  let vixAdj = false;
+  if (vix?.price > 30) {
+    recStock = Math.max(5, recStock - Math.min(10, Math.max(0, recStock - 5)));
+    vixAdj = true;
+  }
+  const recCash = 100 - recStock;
+  const diff    = recStock - basePct;
+
+  let action, instruction;
+  if (diff >= -2) {
+    action = 'hold';
+    instruction = `市場強勢，維持持股 ${basePct}%、現金 ${100-basePct}%，不需調整`;
+  } else {
+    const reducePct = basePct - recStock;
+    const tierIdx   = CB_TIERS.findIndex(t => t === tier);
+    const nextTier  = tierIdx > 0 ? CB_TIERS[tierIdx - 1] : null;
+    const nextStock = nextTier ? Math.min(basePct, Math.round(basePct * nextTier.factor)) : recStock;
+
+    if (dc > 0 && !above && nextStock > recStock) {
+      const addAmt = nextStock - recStock;
+      action = 'add';
+      instruction = `市場今日反彈（${dc > 0 ? '+' : ''}${dc.toFixed(1)}%），可考慮逢低加碼 ${addAmt}%，將持股提升至 ${nextStock}%（需搭配確認訊號）`;
+    } else {
+      action = 'reduce';
+      instruction = `建議減碼至持股 ${recStock}%（較目標基準減少 ${reducePct}%），現金提高至 ${recCash}%`;
+    }
+  }
+
+  const signals = [];
+  if (rsi != null && rsi < 30 && !above) signals.push(`RSI ${rsi.toFixed(0)} 超賣區 → 下跌動能趨緩，留意底部訊號`);
+  if (div.bullish && !above)              signals.push('底部背離確認 → 下跌動能枯竭，可少量分批試單');
+  if (div.bearish)                        signals.push('頂部背離警示 → 不宜追高，逢漲應逐步減碼');
+  if (vixAdj)                            signals.push(`VIX ${vix.price.toFixed(0)} > 30，市場恐慌，建議額外減少持股 10%`);
+
+  const tiersDisplay = CB_TIERS.slice(0, -1).map(t => ({
+    ...t,
+    stockPct: Math.min(basePct, Math.round(basePct * t.factor)),
+    isCurrent: t === tier,
+  }));
+
+  return { basePct, recStock, recCash, action, instruction, signals,
+           pct, dc, tierName: tier.name, tierState: tier.state, tiersDisplay,
+           price: tw.price, ma200: tw.ma200, above };
+}
+
+function renderCashBot(basePct) {
+  const r = computeCashBot(basePct);
+  const mainEl  = document.getElementById('cbMain');
+  const tiersEl = document.getElementById('cbTiers');
+  if (!r) {
+    mainEl.innerHTML = '<div class="empty-box">等待市場資料載入…</div>';
+    return;
+  }
+
+  const tc         = CB_CLR[r.tierState] || 'var(--txt2)';
+  const stockBarW  = ((r.recStock / 100) * 100).toFixed(1);
+  const actionCls  = r.action === 'hold' ? 'cb-action-hold' : r.action === 'add' ? 'cb-action-add' : 'cb-action-reduce';
+  const actionIcon = r.action === 'hold' ? '━ 維持持倉' : r.action === 'add' ? '▲ 逢低加碼機會' : '▼ 建議減碼';
+  const actionClr  = r.action === 'hold' ? 'var(--green)' : r.action === 'add' ? 'var(--blue)' : 'var(--red)';
+
+  mainEl.innerHTML = `
+    <div class="cb-top-grid">
+      <div class="cb-card">
+        <div class="cb-card-title">目前市場狀態</div>
+        <div class="cb-tier-name" style="color:${tc}">${r.tierName}</div>
+        <div style="margin-top:6px;font-size:12px;color:var(--txt2)">
+          年線偏離 <span class="${cls(r.pct)}" style="font-family:'JetBrains Mono',monospace;font-weight:700">${fc(r.pct)}</span>
+        </div>
+        ${r.price != null ? `
+        <div style="display:flex;gap:14px;margin-top:8px;font-size:10px;color:var(--txt3)">
+          <span>0050&nbsp;<span style="color:var(--txt1);font-family:'JetBrains Mono',monospace">${f(r.price)}</span></span>
+          <span>年線&nbsp;<span style="color:var(--yellow);font-family:'JetBrains Mono',monospace">${f(r.ma200)}</span></span>
+        </div>` : ''}
+      </div>
+
+      <div class="cb-card">
+        <div class="cb-card-title">建議配置</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <div>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:800;color:${tc}">${r.recStock}%</span>
+            <span style="font-size:9px;color:var(--txt3);margin-left:3px">持股</span>
+          </div>
+          <div>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:800;color:var(--txt3)">${r.recCash}%</span>
+            <span style="font-size:9px;color:var(--txt3);margin-left:3px">現金</span>
+          </div>
+        </div>
+        <div class="cb-alloc-bar-wrap">
+          <div class="cb-alloc-stock" style="width:${stockBarW}%;background:${tc}"></div>
+          <div class="cb-alloc-cash"></div>
+        </div>
+        <div style="font-size:9px;color:var(--txt3)">目標基準：持股 ${r.basePct}% ／ 現金 ${100-r.basePct}%</div>
+      </div>
+
+      <div class="cb-card">
+        <div class="cb-card-title">操作指令</div>
+        <div class="cb-action-box ${actionCls}">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:${actionClr};margin-bottom:5px">${actionIcon}</div>
+          <div style="font-size:13px;font-weight:600;line-height:1.6;color:var(--txt1)">${r.instruction}</div>
+        </div>
+        ${r.signals.length ? `
+        <div style="display:flex;flex-direction:column;gap:5px;margin-top:10px">
+          ${r.signals.map(s => `<div class="cb-signal">${s}</div>`).join('')}
+        </div>` : ''}
+      </div>
+    </div>`;
+
+  tiersEl.innerHTML = r.tiersDisplay.map(t => {
+    const c   = CB_CLR[t.state] || 'var(--txt2)';
+    const thr = t.threshold >= 0 ? `≥ +${t.threshold}%` : `≥ ${t.threshold}%`;
+    const bw  = ((t.stockPct / 100) * 100).toFixed(1);
+    return `
+    <div class="cb-tier-row ${t.isCurrent ? 'current' : ''}">
+      <span class="cb-tier-label" style="color:${t.isCurrent ? 'var(--cyan)' : 'var(--txt2)'}">${t.name}</span>
+      <span class="cb-tier-thr">${thr}</span>
+      <div class="cb-tier-bar"><div class="cb-tier-bar-fill" style="width:${bw}%;background:${c}"></div></div>
+      <span class="cb-tier-pcts" style="color:${t.isCurrent ? 'var(--cyan)' : 'var(--txt3)'}">
+        ${t.stockPct}% / ${100 - t.stockPct}%
+      </span>
+      ${t.isCurrent ? '<span style="font-size:9px;font-weight:700;color:var(--cyan);flex-shrink:0">&#9664; 當前</span>' : ''}
+    </div>`;
+  }).join('');
+}
+
+function onCbSlider(val) {
+  cbBasePct = parseInt(val);
+  localStorage.setItem('cbBasePct', String(cbBasePct));
+  document.getElementById('cbBaseLabel').textContent = val + '%';
+  renderCashBot(cbBasePct);
+}
+
 /* ─── Init ────────────────────────────────────────────────────────────────── */
+document.getElementById('cbSlider').value    = cbBasePct;
+document.getElementById('cbBaseLabel').textContent = cbBasePct + '%';
 loadData();
 setInterval(loadData, 5 * 60 * 1000);
 </script>
