@@ -185,12 +185,13 @@ def _fetch_tw_quotes() -> dict:
             if prev is None:
                 continue
             if price is None:
-                price = prev
+                # Market closed / not yet traded — skip so Yahoo Finance fallback is used
+                continue
             result[code] = {
                 "price":          price,
                 "prev_close":     prev,
                 "daily_change":   (price - prev) / prev * 100,
-                "is_market_open": z not in ("-", ""),
+                "is_market_open": True,
             }
         logger.info("TWSE quotes fetched: %s", list(result.keys()))
         return result
