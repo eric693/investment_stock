@@ -1060,10 +1060,13 @@ function computeCashBot(basePct) {
   if (div.bearish)                        signals.push('頂部背離警示 → 不宜追高，逢漲應逐步減碼');
   if (vixAdj)                            signals.push(`VIX ${vix.price.toFixed(0)} > 30，市場恐慌，建議額外減少持股 10%`);
 
-  const tiersDisplay = CB_TIERS.slice(0, -1).map(t => ({
+  const tiersDisplay = CB_TIERS.map(t => ({
     ...t,
     stockPct: Math.min(basePct, Math.round(basePct * t.factor)),
     isCurrent: t === tier,
+    thrLabel: t.threshold >= 0 ? `≥ +${t.threshold}%`
+            : t.threshold === -999 ? '< -25%'
+            : `≥ ${t.threshold}%`,
   }));
 
   return { basePct, recStock, recCash, action, instruction, signals,
@@ -1135,7 +1138,7 @@ function renderCashBot(basePct) {
 
   tiersEl.innerHTML = r.tiersDisplay.map(t => {
     const c   = CB_CLR[t.state] || 'var(--txt2)';
-    const thr = t.threshold >= 0 ? `≥ +${t.threshold}%` : `≥ ${t.threshold}%`;
+    const thr = t.thrLabel;
     const bw  = ((t.stockPct / 100) * 100).toFixed(1);
     return `
     <div class="cb-tier-row ${t.isCurrent ? 'current' : ''}">
