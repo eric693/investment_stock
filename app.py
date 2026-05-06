@@ -61,11 +61,15 @@ _cache = {
     "histories":   {},
     "hist_ts":     0.0,
     "price_ts":    0.0,
+    "vix_ts":      0.0,
+    "chips_ts":    0.0,
     "refreshing":  False,
     "vix":         None,
     "foreign_net": None,
     "tw_chips":    None,
 }
+VIX_TTL   = 1800    # 30 min — VIX updates intraday but not per-minute
+CHIPS_TTL = 7200    # 2 hours — TWSE chips published once daily ~14:30
 _refresh_lock = threading.Lock()
 alert_history: list = []
 _line_users: dict = {}
@@ -83,8 +87,12 @@ def _calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     loss     = -delta.clip(upper=0)
     avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
     avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - 100 / (1 + rs)
+    rs  = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100 - 100 / (1 + rs)
+    # Pure uptrend (avg_loss = 0, avg_gain > 0) → no losses → RSI should be 100, not NaN
+    pure_up = (avg_loss == 0) & (avg_gain > 0)
+    rsi = rsi.where(~pure_up, 100.0)
+    return rsi
 
 
 def _calc_macd(series: pd.Series):
@@ -476,7 +484,7 @@ def _fetch_foreign_net() -> dict | None:
             try:
                 net = int(net_str)
             except ValueError:
-                net = 0
+                net = None  # "-" means data unavailable, not zero net
             if "外資及陸資" in name:
                 result["foreign"] = net
             elif "投信" in name:
@@ -645,8 +653,9 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
         "d_val":       round(d_val, 2) if d_val is not None else None,
         "divergence":  divergence,
         "chart":       chart,
-        "nav_est":     round(quote["nav_est"], 2)     if quote.get("nav_est")     else None,
-        "premium_pct": round(quote["premium_pct"], 2) if quote.get("premium_pct") is not None else None,
+        "nav_est":        round(quote["nav_est"], 2)     if quote.get("nav_est")     else None,
+        "premium_pct":    round(quote["premium_pct"], 2) if quote.get("premium_pct") is not None else None,
+        "is_market_open": quote.get("is_market_open", False),
     }
 
 
@@ -716,15 +725,21 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             if quote and hist is not None:
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
 
-        # Refresh VIX and chips on every price cycle too
-        vix = _fetch_vix()
-        if vix:
-            _cache["vix"] = vix
-        chips = _fetch_tw_chips()
-        if chips:
-            _cache["tw_chips"] = chips
+        now_t = time.time()
+        # VIX: refresh at most every 30 min
+        if now_t - _cache["vix_ts"] > VIX_TTL:
+            vix = _fetch_vix()
+            if vix:
+                _cache["vix"]    = vix
+                _cache["vix_ts"] = now_t
+        # Chips: refresh at most every 2 hours (published daily ~14:30)
+        if now_t - _cache["chips_ts"] > CHIPS_TTL:
+            chips = _fetch_tw_chips()
+            if chips:
+                _cache["tw_chips"]  = chips
+                _cache["chips_ts"]  = now_t
 
-        _cache["price_ts"] = time.time()
+        _cache["price_ts"] = now_t
 
 
 def _background_refresh(hist: bool = False, price: bool = True):
@@ -998,7 +1013,7 @@ def api_dashboard():
             # Deduplicate by code+title (ignore ts which changes every call)
             is_dup = any(
                 h.get("code") == a.get("code") and h.get("title") == a.get("title")
-                for h in alert_history[:20]
+                for h in alert_history
             )
             if not is_dup:
                 alert_history.insert(0, a)
@@ -1011,8 +1026,8 @@ def api_dashboard():
             "alerts":        alerts,
             "alert_history": alert_history[:20],
             "updated_at":    datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-            "price_age":     int(time.time() - _cache["price_ts"]),
-            "hist_age":      int(time.time() - _cache["hist_ts"]),
+            "price_age":     int(time.time() - _cache["price_ts"]) if _cache["price_ts"] > 0 else None,
+            "hist_age":      int(time.time() - _cache["hist_ts"])  if _cache["hist_ts"]  > 0 else None,
             "vix":           _cache.get("vix"),
             "foreign_net":   _cache.get("foreign_net"),
             "tw_chips":      _cache.get("tw_chips"),

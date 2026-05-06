@@ -405,6 +405,20 @@ button { cursor: pointer; font-family: inherit; }
   .stock-grid { grid-template-columns: 1fr; }
   .bottom-row { grid-template-columns: 1fr; }
 }
+/* ─── Topbar mobile ───────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  .topbar {
+    flex-wrap: wrap; height: auto; padding: 10px 16px; gap: 8px;
+  }
+  .topbar-meta { display: none; }   /* hide clock/cache on tiny screen */
+  .brand-sub   { display: none; }
+  .search-input { width: 110px; }
+  .topbar-actions .btn span { display: none; }  /* icon-only buttons */
+}
+/* ─── Chart legend mobile ─────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .chart-legend { flex-wrap: wrap; gap: 8px 14px; }
+}
 
 /* ─── Cash Bot ────────────────────────────────────────────────────────── */
 .cb-slider {
@@ -731,7 +745,7 @@ async function testNotify() {
 function render() {
   if (!state) return;
   document.getElementById('updatedAt').textContent = state.updated_at || '-';
-  document.getElementById('cacheAge').textContent  = state.price_age  ?? '-';
+  document.getElementById('cacheAge').textContent  = state.price_age != null ? state.price_age : '初始化中';
 
   renderStockGrid(state.stocks);
   renderSOP(state.sop);
@@ -809,7 +823,13 @@ function _buildCard(sym, s) {
         <div class="scard-sym">${sym}</div>
         <div class="scard-name">${NAMES[sym]||''}</div>
       </div>
-      <span class="scard-tag ${tagCls}">${tagTxt}</span>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        <span class="scard-tag ${tagCls}">${tagTxt}</span>
+        <span style="font-size:9px;display:flex;align-items:center;gap:3px;color:var(--txt3)">
+          <span style="width:5px;height:5px;border-radius:50%;background:${s.is_market_open?'var(--green)':'var(--txt3)'};${s.is_market_open?'box-shadow:0 0 4px var(--green)':''}"></span>
+          ${s.is_market_open?'開盤中':'休市'}
+        </span>
+      </div>
     </div>
     <div class="scard-price">${f(s.price)}</div>
     <div class="scard-chg ${cls(dc)}">${fc(dc)} 今日</div>
