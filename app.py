@@ -270,7 +270,42 @@ def _fetch_twse_history(stock_no: str, months: int = 14) -> pd.DataFrame | None:
     return df
 
 
+# ─── Yahoo Finance helper (with retry) ───────────────────────────────────────
+def _yahoo_get(url: str, params: dict) -> dict | None:
+    """GET a Yahoo Finance chart URL with up to 3 retries and exponential backoff."""
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, params=params,
+                                headers={"User-Agent": "Mozilla/5.0"},
+                                timeout=20)
+            data = resp.json()
+            if data.get("chart", {}).get("error"):
+                logger.warning("Yahoo chart error (attempt %d): %s", attempt + 1,
+                               data["chart"]["error"])
+            else:
+                return data
+        except Exception as exc:
+            logger.warning("Yahoo request error (attempt %d): %s", attempt + 1, exc)
+        if attempt < 2:
+            time.sleep(2 ** attempt)   # 1s, 2s
+    logger.error("Yahoo request failed after 3 attempts: %s", url)
+    return None
+
+
 # ─── US stock helpers (Twelve Data) ──────────────────────────────────────────
+_td_last_req = 0.0
+TD_MIN_INTERVAL = 8.0   # free tier: 8 req/min
+
+
+def _td_throttle():
+    """Sleep just enough to respect Twelve Data free-tier rate limit."""
+    global _td_last_req
+    elapsed = time.time() - _td_last_req
+    if elapsed < TD_MIN_INTERVAL:
+        time.sleep(TD_MIN_INTERVAL - elapsed)
+    _td_last_req = time.time()
+
+
 def _td_get(endpoint: str, params: dict) -> dict | None:
     if not TD_API_KEY:
         logger.error("TWELVEDATA_API_KEY not set")
@@ -312,14 +347,9 @@ def _fetch_td_history(sym: str, exchange: str) -> pd.DataFrame | None:
 
 def _fetch_yahoo_history(ticker: str) -> pd.DataFrame | None:
     try:
-        resp = requests.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
-            params={"interval": "1d", "range": "2y"},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=20,
-        )
-        data   = resp.json()
-        result = data.get("chart", {}).get("result", [])
+        data   = _yahoo_get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+                            {"interval": "1d", "range": "2y"})
+        result = (data or {}).get("chart", {}).get("result", [])
         if not result:
             logger.warning("Yahoo history empty for %s", ticker)
             return None
@@ -355,14 +385,9 @@ def _fetch_yahoo_history(ticker: str) -> pd.DataFrame | None:
 
 def _fetch_yahoo_quote(ticker: str) -> dict | None:
     try:
-        resp = requests.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
-            params={"interval": "1d", "range": "5d"},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15,
-        )
-        data   = resp.json()
-        result = data.get("chart", {}).get("result", [])
+        data   = _yahoo_get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+                            {"interval": "1d", "range": "5d"})
+        result = (data or {}).get("chart", {}).get("result", [])
         if not result:
             return None
         meta   = result[0].get("meta", {})
@@ -411,14 +436,9 @@ def _fetch_td_quote(sym: str, exchange: str) -> dict | None:
 # ─── VIX & 外資買賣超 ──────────────────────────────────────────────────────────
 def _fetch_vix() -> dict | None:
     try:
-        resp = requests.get(
-            "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX",
-            params={"interval": "1d", "range": "10d"},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15,
-        )
-        data   = resp.json()
-        result = data.get("chart", {}).get("result", [])
+        data   = _yahoo_get("https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX",
+                            {"interval": "1d", "range": "10d"})
+        result = (data or {}).get("chart", {}).get("result", [])
         if not result:
             return None
         meta  = result[0].get("meta", {})
@@ -644,9 +664,8 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
                 _cache["histories"][name] = hist
 
         logger.info("Refreshing US histories (Twelve Data)…")
-        for i, (name, (sym, exch)) in enumerate(US_SYMBOLS.items()):
-            if i > 0:
-                time.sleep(8)
+        for name, (sym, exch) in US_SYMBOLS.items():
+            _td_throttle()
             hist = _fetch_td_history(sym, exch)
             if hist is not None:
                 _cache["histories"][name] = hist
@@ -683,9 +702,8 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
 
         logger.info("Refreshing US prices (Twelve Data)…")
-        for i, (name, (sym, exch)) in enumerate(US_SYMBOLS.items()):
-            if i > 0:
-                time.sleep(8)
+        for name, (sym, exch) in US_SYMBOLS.items():
+            _td_throttle()
             quote = _fetch_td_quote(sym, exch)
             hist  = _cache["histories"].get(name)
             if quote and hist is not None:
@@ -742,9 +760,11 @@ def cached_data() -> dict:
 
 
 # ─── SOP logic ────────────────────────────────────────────────────────────────
-def compute_sop(stocks: dict) -> dict:
-    tw  = stocks.get("0050", {})
+def compute_sop(stocks: dict) -> dict | None:
+    tw  = stocks.get("0050")
     qqq = stocks.get("QQQ",  {})
+    if not tw:
+        return None   # caller renders "等待 0050 資料" instead of fake 正常
 
     p0050 = tw.get("pct_from_ma200") or 0.0
     pqqq  = qqq.get("pct_from_ma200") or 0.0
@@ -932,7 +952,7 @@ def check_alerts(stocks: dict, sop: dict) -> list[dict]:
 
     # ── 外資大幅賣超 ──
     fn = _cache.get("foreign_net")
-    if fn and fn.get("foreign") is not None and fn["foreign"] < -30_000_000_000:
+    if fn and fn.get("foreign") is not None and fn["foreign"] < -5_000_000_000:
         sold_yi = abs(fn["foreign"]) / 1e8
         alerts.append({"type": "CRITICAL", "code": "FN", "ts": now_str,
             "title": "外資大幅賣超",

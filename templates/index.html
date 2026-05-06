@@ -366,6 +366,14 @@ button { cursor: pointer; font-family: inherit; }
 .search-loading { text-align:center; padding:40px; color:var(--txt3); font-size:13px; }
 .search-error   { text-align:center; padding:30px; color:var(--red); font-size:12px; }
 
+/* ─── Card highlight (search scroll-to) ──────────────────────────────── */
+@keyframes card-ping {
+  0%   { box-shadow: 0 0 0 0   rgba(6,182,212,.6); }
+  70%  { box-shadow: 0 0 0 8px rgba(6,182,212,0);  }
+  100% { box-shadow: 0 0 0 0   rgba(6,182,212,0);  }
+}
+.scard.highlight { animation: card-ping .8s ease-out 2; border-color: var(--cyan); }
+
 /* ─── Spinner ─────────────────────────────────────────────────────────── */
 .sk   { display: flex; justify-content: center; padding: 28px; }
 .spin {
@@ -784,70 +792,80 @@ function divBanner(div) {
   return '';
 }
 
+const TW_ORDER = ['0050','QQQ','00631L','QLD','00662','00865B'];
+const US_ORDER = ['GOOG','NVDA','TSLA'];
+
+function _buildCard(sym, s) {
+  if (!s) return `<div class="scard flat" id="card-${sym}"><div class="sk"><div class="spin"></div></div></div>`;
+  const dc      = s.daily_change;
+  const cardCls = dc > 0 ? 'up' : dc < 0 ? 'down' : 'flat';
+  const tagCls  = s.above_ma200 ? 'tag-above' : 'tag-below';
+  const tagTxt  = s.above_ma200 ? '年線上' : '年線下';
+  return `
+  <div class="scard ${cardCls}" id="card-${sym}">
+    ${divBanner(s.divergence)}
+    <div class="scard-top">
+      <div>
+        <div class="scard-sym">${sym}</div>
+        <div class="scard-name">${NAMES[sym]||''}</div>
+      </div>
+      <span class="scard-tag ${tagCls}">${tagTxt}</span>
+    </div>
+    <div class="scard-price">${f(s.price)}</div>
+    <div class="scard-chg ${cls(dc)}">${fc(dc)} 今日</div>
+    <hr class="scard-divider">
+    <div class="scard-metrics">
+      <div class="metric-row">
+        <span class="metric-lbl">200MA 年線</span>
+        <span class="metric-val">${f(s.ma200)}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-lbl">偏離年線</span>
+        <span class="metric-val ${cls(s.pct_from_ma200)}">${fc(s.pct_from_ma200)}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-lbl">50MA</span>
+        <span class="metric-val">${f(s.ma50)}</span>
+      </div>
+    </div>
+    <hr class="scard-divider">
+    <div class="scard-metrics">
+      <div class="metric-row">
+        <span class="metric-lbl">RSI 14&ensp;${rsiLabel(s.rsi)}</span>
+        <span class="metric-val" style="color:${rsiColor(s.rsi)}">${s.rsi != null ? f(s.rsi,1) : '-'}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-lbl">K / D (9)</span>
+        <span class="metric-val" style="color:${kdColor(s.k_val)}">${(s.k_val!=null&&s.d_val!=null)?f(s.k_val,1)+' / '+f(s.d_val,1):'-'}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-lbl">MACD</span>
+        <span class="metric-val">${macdBadge(s.macd_cross, s.macd_trend)}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-lbl">背離偵測</span>
+        <span class="metric-val">${divBadge(s.divergence)}</span>
+      </div>
+      ${s.premium_pct != null ? `
+      <div class="metric-row">
+        <span class="metric-lbl">折溢價 (IOPV)</span>
+        <span class="metric-val ${cls(s.premium_pct)}">${fc(s.premium_pct)}</span>
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+
 function renderStockGrid(stocks) {
   if (!stocks) return;
-  document.getElementById('stockGrid').innerHTML = ORDER.map(sym => {
-    const s = stocks[sym];
-    if (!s) return `<div class="scard flat"><div class="sk"><div class="spin"></div></div></div>`;
-    const dc     = s.daily_change;
-    const cardCls = dc > 0 ? 'up' : dc < 0 ? 'down' : 'flat';
-    const tagCls  = s.above_ma200 ? 'tag-above' : 'tag-below';
-    const tagTxt  = s.above_ma200 ? '年線上' : '年線下';
-
-    return `
-    <div class="scard ${cardCls}">
-      ${divBanner(s.divergence)}
-      <div class="scard-top">
-        <div>
-          <div class="scard-sym">${sym}</div>
-          <div class="scard-name">${NAMES[sym]||''}</div>
-        </div>
-        <span class="scard-tag ${tagCls}">${tagTxt}</span>
-      </div>
-      <div class="scard-price">${f(s.price)}</div>
-      <div class="scard-chg ${cls(dc)}">${fc(dc)} 今日</div>
-      <hr class="scard-divider">
-      <div class="scard-metrics">
-        <div class="metric-row">
-          <span class="metric-lbl">200MA 年線</span>
-          <span class="metric-val">${f(s.ma200)}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">偏離年線</span>
-          <span class="metric-val ${cls(s.pct_from_ma200)}">${fc(s.pct_from_ma200)}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">50MA</span>
-          <span class="metric-val">${f(s.ma50)}</span>
-        </div>
-      </div>
-      <hr class="scard-divider">
-      <div class="scard-metrics">
-        <div class="metric-row">
-          <span class="metric-lbl">RSI 14&ensp;${rsiLabel(s.rsi)}</span>
-          <span class="metric-val" style="color:${rsiColor(s.rsi)}">${s.rsi != null ? f(s.rsi,1) : '-'}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">K / D (9)</span>
-          <span class="metric-val" style="color:${kdColor(s.k_val)}">${(s.k_val!=null&&s.d_val!=null)?f(s.k_val,1)+' / '+f(s.d_val,1):'-'}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">MACD</span>
-          <span class="metric-val">${macdBadge(s.macd_cross, s.macd_trend)}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">背離偵測</span>
-          <span class="metric-val">${divBadge(s.divergence)}</span>
-        </div>
-        ${s.premium_pct != null ? `
-        <div class="metric-row">
-          <span class="metric-lbl">折溢價 (IOPV)</span>
-          <span class="metric-val ${cls(s.premium_pct)}">${fc(s.premium_pct)}</span>
-        </div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
+  const sep = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:10px;margin:4px 0 2px">
+    <span style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txt3)">美股</span>
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+  </div>`;
+  const twCards = TW_ORDER.map(sym => _buildCard(sym, stocks[sym])).join('');
+  const usCards = US_ORDER.map(sym => _buildCard(sym, stocks[sym])).join('');
+  document.getElementById('stockGrid').innerHTML = twCards + sep + usCards;
 }
+
 
 /* ── SOP panel ── */
 const STATUS_LABEL = {normal:'正常', watch:'留意', alert:'警報', active:'啟動', standby:'待命'};
@@ -861,7 +879,11 @@ function sopValueClass(key, sop) {
 }
 
 function renderSOP(sop) {
-  if (!sop) return;
+  if (!sop) {
+    document.getElementById('sopStack').innerHTML =
+      '<div class="empty-box" style="padding:32px;font-size:12px">等待 0050 資料載入，SOP 計算暫停…</div>';
+    return;
+  }
   const keys = ['sop01','sop02','sop03','sop04','sop05'];
   document.getElementById('sopStack').innerHTML = keys.map((k,i) => {
     const s = sop[k]; if (!s) return '';
@@ -1028,9 +1050,25 @@ function renderMarketSentiment(vix, fn) {
 /* ── Search ── */
 let searchChart = null;
 
+const KNOWN_SYMS = new Set([...TW_ORDER, ...US_ORDER]);
+
 async function doSearch() {
-  const q = document.getElementById('searchInput').value.trim();
-  if (!q) return;
+  const raw = document.getElementById('searchInput').value.trim();
+  if (!raw) return;
+  const q = raw.toUpperCase();
+
+  // If the symbol is already on the main page, scroll to it
+  if (KNOWN_SYMS.has(q)) {
+    document.getElementById('searchInput').value = '';
+    const card = document.getElementById(`card-${q}`);
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('highlight');
+      setTimeout(() => card.classList.remove('highlight'), 1800);
+    }
+    return;
+  }
+
   document.getElementById('searchContent').innerHTML =
     '<div class="search-loading">搜尋中…</div>';
   document.getElementById('searchOverlay').classList.add('open');
