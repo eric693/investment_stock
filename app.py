@@ -970,7 +970,12 @@ def api_dashboard():
         alerts = check_alerts(stocks, sop)
 
         for a in alerts:
-            if a not in alert_history:
+            # Deduplicate by code+title (ignore ts which changes every call)
+            is_dup = any(
+                h.get("code") == a.get("code") and h.get("title") == a.get("title")
+                for h in alert_history[:20]
+            )
+            if not is_dup:
                 alert_history.insert(0, a)
         while len(alert_history) > 50:
             alert_history.pop()

@@ -209,11 +209,14 @@ button { cursor: pointer; font-family: inherit; }
 .panel-body  { padding: 16px 18px; }
 
 /* ─── Chart panel ─────────────────────────────────────────────────────── */
-.chart-tabs { display: flex; gap: 4px; }
+.chart-tabs { display: flex; gap: 4px; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+.chart-tabs::-webkit-scrollbar { height: 3px; }
+.chart-tabs::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 .ctab {
   background: none; border: 1px solid var(--border);
   color: var(--txt2); padding: 4px 12px; border-radius: 6px;
   font-size: 11px; font-weight: 600; transition: all .15s;
+  flex-shrink: 0;
 }
 .ctab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ctab:hover:not(.active) { background: var(--bg3); }
