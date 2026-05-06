@@ -55,6 +55,7 @@ _cache = {
     "refreshing":  False,
     "vix":         None,
     "foreign_net": None,
+    "tw_chips":    None,
 }
 _refresh_lock = threading.Lock()
 alert_history: list = []
@@ -187,11 +188,16 @@ def _fetch_tw_quotes() -> dict:
             if price is None:
                 # Market closed / not yet traded — skip so Yahoo Finance fallback is used
                 continue
+            pz_raw  = item.get("pz", "0")
+            nav_est = float(pz_raw) if pz_raw and pz_raw not in ("0", "-", "") else None
+            premium_pct = round((price - nav_est) / nav_est * 100, 2) if nav_est else None
             result[code] = {
                 "price":          price,
                 "prev_close":     prev,
                 "daily_change":   (price - prev) / prev * 100,
                 "is_market_open": True,
+                "nav_est":        nav_est,
+                "premium_pct":    premium_pct,
             }
         logger.info("TWSE quotes fetched: %s", list(result.keys()))
         return result
@@ -449,6 +455,82 @@ def _fetch_foreign_net() -> dict | None:
         return None
 
 
+# ─── 台股籌碼：三大法人 + 融資融券 ───────────────────────────────────────────────
+def _fetch_tw_chips() -> dict | None:
+    """Fetch per-stock 三大法人 (T86) and 融資融券 (MI_MARGN) for TW ETFs."""
+    def _int(s: str) -> int:
+        try:
+            return int(s.replace(",", "").replace("+", "").strip())
+        except (ValueError, AttributeError):
+            return 0
+
+    result: dict = {}
+
+    # T86: per-stock 外資 / 投信 / 自營商 buy-sell net (shares)
+    try:
+        resp = requests.get(
+            "https://www.twse.com.tw/fund/T86",
+            params={"response": "json", "date": "", "selectType": "ALLBUT0999"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("stat") == "OK":
+            fields = data.get("fields", [])
+            # Locate columns — use exact match where names overlap as substrings
+            def _col(name, exact=False):
+                for i, f in enumerate(fields):
+                    if (f == name) if exact else (name in f):
+                        return i
+                return -1
+            idx_foreign = _col("外陸資買賣超股數")          # 外陸資(不含外資自營商)
+            idx_fdealer = _col("外資自營商買賣超")           # 外資自營商
+            idx_trust   = _col("投信買賣超")
+            idx_dealer  = _col("自營商買賣超股數", exact=True)  # total dealer, exact!
+            idx_total   = len(fields) - 1                   # 三大法人合計 is always last
+            for row in data.get("data", []):
+                code = row[0].strip()
+                if code in TW_SYMBOLS:
+                    foreign_net = ((_int(row[idx_foreign]) if idx_foreign >= 0 else 0) +
+                                   (_int(row[idx_fdealer]) if idx_fdealer >= 0 else 0))
+                    result[code] = {
+                        "foreign_net": foreign_net,
+                        "trust_net":   _int(row[idx_trust])  if idx_trust  >= 0 else 0,
+                        "dealer_net":  _int(row[idx_dealer]) if idx_dealer >= 0 else 0,
+                        "total_net":   _int(row[idx_total]),
+                        "date":        data.get("date", ""),
+                    }
+        logger.info("T86 chips: %s", list(result.keys()))
+    except Exception as exc:
+        logger.error("T86 fetch error: %s", exc)
+
+    # MI_MARGN: per-stock 融資 / 融券 balance (unit: 張=1000 shares)
+    try:
+        resp = requests.get(
+            "https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN",
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            timeout=15,
+        )
+        for row in resp.json():
+            code = row.get("股票代號", "").strip()
+            if code in TW_SYMBOLS:
+                margin_bal  = _int(row.get("融資今日餘額", ""))
+                margin_prev = _int(row.get("融資前日餘額", ""))
+                short_bal   = _int(row.get("融券今日餘額", ""))
+                short_prev  = _int(row.get("融券前日餘額", ""))
+                result.setdefault(code, {}).update({
+                    "margin_bal":  margin_bal,
+                    "margin_chg":  margin_bal - margin_prev,
+                    "short_bal":   short_bal,
+                    "short_chg":   short_bal - short_prev,
+                })
+        logger.info("MI_MARGN chips: %s", [k for k in result if "margin_bal" in result[k]])
+    except Exception as exc:
+        logger.error("MI_MARGN fetch error: %s", exc)
+
+    return result or None
+
+
 # ─── Build stock entry ────────────────────────────────────────────────────────
 def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
     current   = quote["price"]
@@ -524,10 +606,12 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
         "macd_signal":    round(macd_sig, 4) if macd_sig is not None else None,
         "macd_cross":     macd_cross,
         "macd_trend":     macd_trend,
-        "k_val":      round(k_val, 2) if k_val is not None else None,
-        "d_val":      round(d_val, 2) if d_val is not None else None,
-        "divergence": divergence,
-        "chart":      chart,
+        "k_val":       round(k_val, 2) if k_val is not None else None,
+        "d_val":       round(d_val, 2) if d_val is not None else None,
+        "divergence":  divergence,
+        "chart":       chart,
+        "nav_est":     round(quote["nav_est"], 2)     if quote.get("nav_est")     else None,
+        "premium_pct": round(quote["premium_pct"], 2) if quote.get("premium_pct") is not None else None,
     }
 
 
@@ -559,6 +643,9 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
         fn = _fetch_foreign_net()
         if fn:
             _cache["foreign_net"] = fn
+        chips = _fetch_tw_chips()
+        if chips:
+            _cache["tw_chips"] = chips
 
         _cache["hist_ts"] = time.time()
 
@@ -583,10 +670,13 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             if quote and hist is not None:
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
 
-        # Refresh VIX on every price cycle too (fast, no auth needed)
+        # Refresh VIX and chips on every price cycle too
         vix = _fetch_vix()
         if vix:
             _cache["vix"] = vix
+        chips = _fetch_tw_chips()
+        if chips:
+            _cache["tw_chips"] = chips
 
         _cache["price_ts"] = time.time()
 
@@ -872,6 +962,7 @@ def api_dashboard():
             "hist_age":      int(time.time() - _cache["hist_ts"]),
             "vix":           _cache.get("vix"),
             "foreign_net":   _cache.get("foreign_net"),
+            "tw_chips":      _cache.get("tw_chips"),
         })
     except Exception as exc:
         logger.exception("Dashboard error")

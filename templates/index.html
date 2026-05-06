@@ -296,6 +296,22 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 10px; color: var(--txt3); line-height: 1.6;
 }
 
+/* ─── Chip panel ─────────────────────────────────────────────────────── */
+.chip-table { width:100%; border-collapse:collapse; font-size:11px; }
+.chip-table th {
+  text-align:right; padding:5px 10px; color:var(--txt3);
+  font-size:9px; font-weight:600; letter-spacing:.3px; border-bottom:1px solid var(--border);
+}
+.chip-table th:first-child { text-align:left; }
+.chip-table td {
+  text-align:right; padding:6px 10px; border-bottom:1px solid var(--border);
+  font-family:'JetBrains Mono',monospace; font-size:11px;
+}
+.chip-table td:first-child { text-align:left; font-family:'Inter',sans-serif; font-weight:600; }
+.chip-table tr:last-child td { border-bottom:none; }
+.chip-table tr:hover td { background:var(--bg3); }
+.chip-note { font-size:9px; color:var(--txt3); margin-top:10px; line-height:1.5; }
+
 /* ─── Market Sentiment ────────────────────────────────────────────────── */
 .vix-bar-wrap {
   height: 6px; background: var(--bg3); border-radius: 3px;
@@ -509,6 +525,20 @@ button { cursor: pointer; font-family: inherit; }
     </div>
   </div>
 
+  <!-- 台股籌碼 panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">台股籌碼面</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">三大法人買賣超（股）· 融資融券（張）</span>
+      </div>
+      <span id="chipDate" style="font-size:10px;color:var(--txt3)">-</span>
+    </div>
+    <div class="panel-body" id="chipPanel">
+      <div class="sk"><div class="spin"></div></div>
+    </div>
+  </div>
+
   <!-- Bottom row -->
   <div class="bottom-row">
 
@@ -641,6 +671,7 @@ function render() {
   renderChart(curSym);
   renderMarketSentiment(state.vix, state.foreign_net);
   renderCashBot(cbBasePct);
+  renderChips(state.tw_chips);
 }
 
 /* ── Stock grid ── */
@@ -746,6 +777,11 @@ function renderStockGrid(stocks) {
           <span class="metric-lbl">背離偵測</span>
           <span class="metric-val">${divBadge(s.divergence)}</span>
         </div>
+        ${s.premium_pct != null ? `
+        <div class="metric-row">
+          <span class="metric-lbl">折溢價 (IOPV)</span>
+          <span class="metric-val ${cls(s.premium_pct)}">${fc(s.premium_pct)}</span>
+        </div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -1072,6 +1108,68 @@ function computeCashBot(basePct) {
   return { basePct, recStock, recCash, action, instruction, signals,
            pct, dc, tierName: tier.name, tierState: tier.state, tiersDisplay,
            price: tw.price, ma200: tw.ma200, above };
+}
+
+/* ── Chip panel ── */
+function fShares(v) {
+  if (v == null || v === '') return '-';
+  const n   = Number(v);
+  const abs = Math.abs(n);
+  const sign = n >= 0 ? '+' : '-';
+  if (abs >= 1000000) return sign + (abs/1000000).toFixed(2) + 'M';
+  if (abs >= 1000)    return sign + (abs/1000).toFixed(0)    + 'K';
+  return sign + abs;
+}
+function chipColor(v) {
+  if (v == null) return 'var(--txt3)';
+  return v > 0 ? 'var(--red)' : v < 0 ? 'var(--green)' : 'var(--txt2)';
+}
+
+function renderChips(chips) {
+  const panel = document.getElementById('chipPanel');
+  if (!panel) return;
+  if (!chips) { panel.innerHTML = '<div class="empty-box">籌碼資料載入中…</div>'; return; }
+
+  const TW_ORDER = ['0050','00631L','00662','00865B'];
+  const dateEl = document.getElementById('chipDate');
+  const anyDate = TW_ORDER.map(c => chips[c]?.date).find(Boolean);
+  if (dateEl && anyDate) dateEl.textContent = anyDate;
+
+  const rows = TW_ORDER.map(code => {
+    const c = chips[code];
+    if (!c) return `<tr><td>${code}</td><td colspan="7" style="color:var(--txt3);text-align:center">-</td></tr>`;
+    const fNet  = c.foreign_net  ?? null;
+    const tNet  = c.trust_net    ?? null;
+    const dNet  = c.dealer_net   ?? null;
+    const tot   = c.total_net    ?? null;
+    const mBal  = c.margin_bal   ?? null;
+    const mChg  = c.margin_chg   ?? null;
+    const sBal  = c.short_bal    ?? null;
+    return `<tr>
+      <td>${code}</td>
+      <td style="color:${chipColor(fNet)}">${fShares(fNet)}</td>
+      <td style="color:${chipColor(tNet)}">${fShares(tNet)}</td>
+      <td style="color:${chipColor(dNet)}">${fShares(dNet)}</td>
+      <td style="color:${chipColor(tot)};font-weight:600">${fShares(tot)}</td>
+      <td style="color:var(--txt1)">${mBal != null ? mBal.toLocaleString() : '-'}</td>
+      <td style="color:${chipColor(mChg)}">${mChg != null ? (mChg>=0?'+':'')+mChg.toLocaleString() : '-'}</td>
+      <td style="color:var(--txt2)">${sBal != null ? sBal.toLocaleString() : '-'}</td>
+    </tr>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <table class="chip-table">
+      <thead><tr>
+        <th style="text-align:left">代號</th>
+        <th>外資</th><th>投信</th><th>自營</th><th>三大合計</th>
+        <th>融資餘額</th><th>融資增減</th><th>融券餘額</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="chip-note">
+      三大法人單位：股數 &nbsp;|&nbsp; 融資融券單位：張（1張＝1000股）
+      &nbsp;|&nbsp; 紅色＝買超/增加，綠色＝賣超/減少
+    </div>`;
 }
 
 function renderCashBot(basePct) {
