@@ -1091,7 +1091,12 @@ function renderSearchResult(s) {
       <span class="scard-tag ${tagCls}" style="margin-top:4px">${tagTxt}</span>
     </div>
     <div class="search-modal-price ${chgCls}">${f(s.price)}</div>
-    <div class="scard-chg ${chgCls}" style="font-size:14px">${fc(dc)} 今日</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="scard-chg ${chgCls}" style="font-size:14px">${fc(dc)} 今日</div>
+      <span style="font-size:9px;color:var(--txt3);padding:1px 6px;background:var(--bg3);border-radius:4px;border:1px solid var(--border)">
+        ${s.cached ? '快取' : '即時'}
+      </span>
+    </div>
     <div class="search-chart-wrap"><canvas id="searchChartCanvas"></canvas></div>
     <hr class="scard-divider">
     <div class="scard-metrics">${rows}</div>`;

@@ -70,6 +70,11 @@ _refresh_lock = threading.Lock()
 alert_history: list = []
 _line_users: dict = {}
 
+# Search cache: {ticker: {"entry": dict, "hist": DataFrame, "hist_ts": float, "price_ts": float}}
+_search_cache: dict = {}
+SEARCH_HIST_TTL  = 43200   # 12 hours — history data rarely changes intraday
+SEARCH_PRICE_TTL = 300     # 5 minutes — keep quote reasonably fresh
+
 
 # ─── Technical Indicators ─────────────────────────────────────────────────────
 def _calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
@@ -1078,22 +1083,40 @@ def api_search():
 
     is_tw  = bool(re.match(r"^\d", q))
     ticker = f"{q}.TW" if is_tw else q
+    now    = time.time()
+    cached = _search_cache.get(ticker, {})
 
-    quote = _fetch_yahoo_quote(ticker)
-    if not quote:
-        return jsonify({"error": f"找不到「{q}」，請確認代號正確"}), 404
-
-    hist = _fetch_yahoo_history(ticker)
+    # Fetch history only when cache is cold or expired
+    hist = None
+    if now - cached.get("hist_ts", 0) < SEARCH_HIST_TTL:
+        hist = cached.get("hist")
     if hist is None:
-        return jsonify({"error": f"「{q}」歷史資料取得失敗"}), 404
+        hist = _fetch_yahoo_history(ticker)
+        if hist is None:
+            return jsonify({"error": f"「{q}」歷史資料取得失敗"}), 404
+        cached["hist"]    = hist
+        cached["hist_ts"] = now
 
-    entry        = _build_stock_entry(q, hist, quote)
-    # Use Yahoo short name if not in built-in dict
+    # Fetch quote only when price cache is stale
+    quote = None
+    if now - cached.get("price_ts", 0) < SEARCH_PRICE_TTL:
+        quote = cached.get("quote")
+    if quote is None:
+        quote = _fetch_yahoo_quote(ticker)
+        if not quote:
+            return jsonify({"error": f"找不到「{q}」，請確認代號正確"}), 404
+        cached["quote"]    = quote
+        cached["price_ts"] = now
+
+    _search_cache[ticker] = cached
+
+    entry = _build_stock_entry(q, hist, quote)
     if entry.get("name") == q:
         entry["name"] = quote.get("short_name") or q
     entry["code"]   = q
     entry["ticker"] = ticker
     entry["is_tw"]  = is_tw
+    entry["cached"] = now - cached.get("price_ts", now) < 1   # tells frontend if served from cache
     return jsonify(entry)
 
 
