@@ -37,6 +37,12 @@ US_SYMBOLS = {
     "QQQ": ("QQQ", "NASDAQ"),
     "QLD": ("QLD", ""),
 }
+# Yahoo Finance-only US stocks (no Twelve Data quota needed)
+YF_US_SYMBOLS = {
+    "GOOG": "GOOG",
+    "NVDA": "NVDA",
+    "TSLA": "TSLA",
+}
 SYMBOL_NAMES = {
     "0050":   "元大台灣50",
     "QQQ":    "Invesco QQQ ETF",
@@ -44,6 +50,9 @@ SYMBOL_NAMES = {
     "QLD":    "ProShares Ultra QQQ",
     "00662":  "富邦NASDAQ",
     "00865B": "國泰US短期公債",
+    "GOOG":   "Alphabet (Google)",
+    "NVDA":   "NVIDIA",
+    "TSLA":   "Tesla",
 }
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
@@ -368,6 +377,7 @@ def _fetch_yahoo_quote(ticker: str) -> dict | None:
             "prev_close":     float(prev),
             "daily_change":   (float(price) - float(prev)) / float(prev) * 100 if prev else 0.0,
             "is_market_open": meta.get("marketState") == "REGULAR",
+            "short_name":     meta.get("shortName") or meta.get("longName", ""),
         }
     except Exception as exc:
         logger.error("Yahoo quote error %s: %s", ticker, exc)
@@ -636,6 +646,12 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             if hist is not None:
                 _cache["histories"][name] = hist
 
+        logger.info("Refreshing YF US histories…")
+        for name, ticker in YF_US_SYMBOLS.items():
+            hist = _fetch_yahoo_history(ticker)
+            if hist is not None:
+                _cache["histories"][name] = hist
+
         logger.info("Refreshing VIX and 外資買賣超…")
         vix = _fetch_vix()
         if vix:
@@ -666,6 +682,13 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             if i > 0:
                 time.sleep(8)
             quote = _fetch_td_quote(sym, exch)
+            hist  = _cache["histories"].get(name)
+            if quote and hist is not None:
+                _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
+
+        logger.info("Refreshing YF US prices…")
+        for name, ticker in YF_US_SYMBOLS.items():
+            quote = _fetch_yahoo_quote(ticker)
             hist  = _cache["histories"].get(name)
             if quote and hist is not None:
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
@@ -1039,6 +1062,34 @@ def api_line_users():
         "push_users_configured": LINE_USER_IDS,
         "seen_users":            _line_users,
     })
+
+
+@app.route("/api/search")
+def api_search():
+    import re
+    q = request.args.get("q", "").strip().upper()
+    if not q or len(q) > 12:
+        return jsonify({"error": "請輸入有效的股票代號"}), 400
+
+    is_tw  = bool(re.match(r"^\d", q))
+    ticker = f"{q}.TW" if is_tw else q
+
+    quote = _fetch_yahoo_quote(ticker)
+    if not quote:
+        return jsonify({"error": f"找不到「{q}」，請確認代號正確"}), 404
+
+    hist = _fetch_yahoo_history(ticker)
+    if hist is None:
+        return jsonify({"error": f"「{q}」歷史資料取得失敗"}), 404
+
+    entry        = _build_stock_entry(q, hist, quote)
+    # Use Yahoo short name if not in built-in dict
+    if entry.get("name") == q:
+        entry["name"] = quote.get("short_name") or q
+    entry["code"]   = q
+    entry["ticker"] = ticker
+    entry["is_tw"]  = is_tw
+    return jsonify(entry)
 
 
 if __name__ == "__main__":

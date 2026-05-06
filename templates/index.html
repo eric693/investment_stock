@@ -328,6 +328,41 @@ button { cursor: pointer; font-family: inherit; }
   border-top: 1px solid var(--border);
 }
 
+/* ─── Search ─────────────────────────────────────────────────────────── */
+.search-wrap {
+  display:flex; align-items:center; gap:6px;
+}
+.search-input {
+  background:var(--bg2); border:1px solid var(--border); border-radius:7px;
+  color:var(--txt1); font-family:inherit; font-size:12px;
+  padding:5px 12px; width:150px; outline:none; transition:border-color .15s;
+}
+.search-input:focus { border-color:var(--cyan); }
+.search-input::placeholder { color:var(--txt3); }
+.search-overlay {
+  display:none; position:fixed; inset:0; z-index:200;
+  background:rgba(8,12,20,.85); backdrop-filter:blur(4px);
+  align-items:flex-start; justify-content:center; padding-top:80px;
+}
+.search-overlay.open { display:flex; }
+.search-modal {
+  background:var(--bg2); border:1px solid var(--border2); border-radius:14px;
+  width:min(600px,94vw); max-height:82vh; overflow-y:auto;
+  padding:22px 24px; position:relative;
+}
+.search-modal-close {
+  position:absolute; top:14px; right:16px;
+  background:none; border:none; color:var(--txt3); font-size:18px; cursor:pointer;
+  line-height:1; transition:color .15s;
+}
+.search-modal-close:hover { color:var(--txt1); }
+.search-modal-sym  { font-size:22px; font-weight:800; letter-spacing:-.5px; }
+.search-modal-name { font-size:11px; color:var(--txt3); margin-top:2px; }
+.search-modal-price{ font-size:34px; font-weight:800; margin:10px 0 2px; font-family:'JetBrains Mono',monospace; }
+.search-chart-wrap { height:180px; margin:14px 0 6px; }
+.search-loading { text-align:center; padding:40px; color:var(--txt3); font-size:13px; }
+.search-error   { text-align:center; padding:30px; color:var(--red); font-size:12px; }
+
 /* ─── Spinner ─────────────────────────────────────────────────────────── */
 .sk   { display: flex; justify-content: center; padding: 28px; }
 .spin {
@@ -438,6 +473,18 @@ button { cursor: pointer; font-family: inherit; }
     </div>
   </div>
 
+  <div class="search-wrap">
+    <input class="search-input" id="searchInput" type="text"
+           placeholder="搜尋股票代號…"
+           onkeydown="if(event.key==='Enter') doSearch()"
+           autocomplete="off" spellcheck="false">
+    <button class="btn btn-ghost" onclick="doSearch()" style="padding:5px 10px">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="6.5" cy="6.5" r="4.5"/><path d="M10 10l3.5 3.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
   <div class="topbar-actions">
     <button class="btn btn-ghost" id="refreshBtn" onclick="forceRefresh()">
       <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -477,6 +524,9 @@ button { cursor: pointer; font-family: inherit; }
           <button class="ctab"        onclick="switchChart(this,'QLD')">QLD</button>
           <button class="ctab"        onclick="switchChart(this,'00662')">00662</button>
           <button class="ctab"        onclick="switchChart(this,'00865B')">00865B</button>
+          <button class="ctab"        onclick="switchChart(this,'GOOG')">GOOG</button>
+          <button class="ctab"        onclick="switchChart(this,'NVDA')">NVDA</button>
+          <button class="ctab"        onclick="switchChart(this,'TSLA')">TSLA</button>
         </div>
       </div>
       <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
@@ -574,6 +624,14 @@ button { cursor: pointer; font-family: inherit; }
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- Search overlay -->
+<div class="search-overlay" id="searchOverlay" onclick="closeSearch(event)">
+  <div class="search-modal" id="searchModal">
+    <button class="search-modal-close" onclick="closeSearchModal()">✕</button>
+    <div id="searchContent"></div>
   </div>
 </div>
 
@@ -678,9 +736,10 @@ function render() {
 const NAMES = {
   '0050':'元大台灣50', 'QQQ':'Invesco QQQ',
   '00631L':'台灣50正2', 'QLD':'Ultra QQQ (2x)',
-  '00662':'富邦NASDAQ', '00865B':'國泰US短債'
+  '00662':'富邦NASDAQ', '00865B':'國泰US短債',
+  'GOOG':'Alphabet (Google)', 'NVDA':'NVIDIA', 'TSLA':'Tesla',
 };
-const ORDER = ['0050','QQQ','00631L','QLD','00662','00865B'];
+const ORDER = ['0050','QQQ','00631L','QLD','00662','00865B','GOOG','NVDA','TSLA'];
 
 function rsiColor(v) {
   if (v == null) return 'var(--txt2)';
@@ -961,6 +1020,101 @@ function renderMarketSentiment(vix, fn) {
   }
 
   panel.innerHTML = html;
+}
+
+/* ── Search ── */
+let searchChart = null;
+
+async function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  if (!q) return;
+  document.getElementById('searchContent').innerHTML =
+    '<div class="search-loading">搜尋中…</div>';
+  document.getElementById('searchOverlay').classList.add('open');
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    if (!r.ok || d.error) {
+      document.getElementById('searchContent').innerHTML =
+        `<div class="search-error">${d.error || '查詢失敗'}</div>`;
+      return;
+    }
+    renderSearchResult(d);
+  } catch(e) {
+    document.getElementById('searchContent').innerHTML =
+      '<div class="search-error">網路錯誤，請稍後再試</div>';
+  }
+}
+
+function closeSearchModal() {
+  document.getElementById('searchOverlay').classList.remove('open');
+  if (searchChart) { searchChart.destroy(); searchChart = null; }
+  document.getElementById('searchInput').value = '';
+}
+
+function closeSearch(e) {
+  if (e.target === document.getElementById('searchOverlay')) closeSearchModal();
+}
+
+function renderSearchResult(s) {
+  const dc      = s.daily_change;
+  const chgCls  = dc > 0 ? 'pos' : dc < 0 ? 'neg' : 'neu';
+  const tagCls  = s.above_ma200 ? 'tag-above' : 'tag-below';
+  const tagTxt  = s.above_ma200 ? '年線上' : '年線下';
+
+  const metrics = [
+    ['200MA 年線',  f(s.ma200)],
+    ['偏離年線',    `<span class="${cls(s.pct_from_ma200)}">${fc(s.pct_from_ma200)}</span>`],
+    ['50MA',        f(s.ma50)],
+    ['RSI 14',      `<span style="color:${rsiColor(s.rsi)}">${rsiLabel(s.rsi)}${s.rsi!=null?f(s.rsi,1):'-'}</span>`],
+    ['K / D (9)',   (s.k_val!=null&&s.d_val!=null)?f(s.k_val,1)+' / '+f(s.d_val,1):'-'],
+    ['MACD',        macdBadge(s.macd_cross, s.macd_trend)],
+    ['背離偵測',    divBadge(s.divergence)],
+  ];
+  if (s.premium_pct != null)
+    metrics.push(['折溢價 (IOPV)', `<span class="${cls(s.premium_pct)}">${fc(s.premium_pct)}</span>`]);
+
+  const rows = metrics.map(([l,v]) =>
+    `<div class="metric-row"><span class="metric-lbl">${l}</span><span class="metric-val">${v}</span></div>`
+  ).join('');
+
+  document.getElementById('searchContent').innerHTML = `
+    ${divBanner(s.divergence)}
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div class="search-modal-sym">${s.code}</div>
+        <div class="search-modal-name">${s.name || s.code}</div>
+      </div>
+      <span class="scard-tag ${tagCls}" style="margin-top:4px">${tagTxt}</span>
+    </div>
+    <div class="search-modal-price ${chgCls}">${f(s.price)}</div>
+    <div class="scard-chg ${chgCls}" style="font-size:14px">${fc(dc)} 今日</div>
+    <div class="search-chart-wrap"><canvas id="searchChartCanvas"></canvas></div>
+    <hr class="scard-divider">
+    <div class="scard-metrics">${rows}</div>`;
+
+  // Draw chart
+  if (s.chart) {
+    const ctx  = document.getElementById('searchChartCanvas').getContext('2d');
+    if (searchChart) searchChart.destroy();
+    const grad = ctx.createLinearGradient(0,0,0,180);
+    grad.addColorStop(0,'rgba(6,182,212,.15)'); grad.addColorStop(1,'rgba(6,182,212,0)');
+    searchChart = new Chart(ctx, {
+      type:'line', data:{ labels: s.chart.dates,
+        datasets:[
+          {label:'收盤價',data:s.chart.prices,borderColor:'#06b6d4',backgroundColor:grad,
+           borderWidth:1.5,pointRadius:0,fill:true,tension:.05},
+          {label:'200MA',data:s.chart.ma200,borderColor:'#eab308',borderWidth:1.2,
+           pointRadius:0,fill:false,borderDash:[4,2]},
+          {label:'50MA', data:s.chart.ma50, borderColor:'#ef4444',borderWidth:1,
+           pointRadius:0,fill:false,opacity:.6},
+        ]},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},
+        scales:{x:{ticks:{maxTicksLimit:6,font:{size:9}},grid:{color:'rgba(255,255,255,.04)'}},
+                y:{ticks:{font:{size:9}},grid:{color:'rgba(255,255,255,.04)'},position:'right'}}}
+    });
+  }
 }
 
 /* ── Chart ── */
@@ -1263,6 +1417,7 @@ document.getElementById('cbSlider').value    = cbBasePct;
 document.getElementById('cbBaseLabel').textContent = cbBasePct + '%';
 loadData();
 setInterval(loadData, 5 * 60 * 1000);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSearchModal(); });
 </script>
 </body>
 </html>
