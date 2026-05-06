@@ -1132,7 +1132,7 @@ function renderSearchResult(s) {
     <div style="display:flex;align-items:center;gap:10px">
       <div class="scard-chg ${chgCls}" style="font-size:14px">${fc(dc)} 今日</div>
       <span style="font-size:9px;color:var(--txt3);padding:1px 6px;background:var(--bg3);border-radius:4px;border:1px solid var(--border)">
-        ${s.cached ? '快取' : '即時'}
+        ${s.from_cache ? '快取' : '即時'}
       </span>
     </div>
     <div class="search-chart-wrap"><canvas id="searchChartCanvas"></canvas></div>
@@ -1330,12 +1330,12 @@ function renderChips(chips) {
   if (!panel) return;
   if (!chips) { panel.innerHTML = '<div class="empty-box">籌碼資料載入中…</div>'; return; }
 
-  const TW_ORDER = ['0050','00631L','00662','00865B'];
+  const CHIP_CODES = ['0050','00631L','00662','00865B'];
   const dateEl = document.getElementById('chipDate');
-  const anyDate = TW_ORDER.map(c => chips[c]?.date).find(Boolean);
+  const anyDate = CHIP_CODES.map(c => chips[c]?.date).find(Boolean);
   if (dateEl && anyDate) dateEl.textContent = anyDate;
 
-  const rows = TW_ORDER.map(code => {
+  const rows = CHIP_CODES.map(code => {
     const c = chips[code];
     if (!c) return `<tr><td>${code}</td><td colspan="7" style="color:var(--txt3);text-align:center">-</td></tr>`;
     const fNet  = c.foreign_net  ?? null;

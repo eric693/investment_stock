@@ -208,7 +208,7 @@ def _fetch_tw_quotes() -> dict:
             result[code] = {
                 "price":          price,
                 "prev_close":     prev,
-                "daily_change":   (price - prev) / prev * 100,
+                "daily_change":   (price - prev) / prev * 100 if prev else 0.0,
                 "is_market_open": True,
                 "nav_est":        nav_est,
                 "premium_pct":    premium_pct,
@@ -1118,9 +1118,12 @@ def api_search():
         cached["hist_ts"] = now
 
     # Fetch quote only when price cache is stale
+    price_from_cache = False
     quote = None
     if now - cached.get("price_ts", 0) < SEARCH_PRICE_TTL:
         quote = cached.get("quote")
+        if quote:
+            price_from_cache = True
     if quote is None:
         quote = _fetch_yahoo_quote(ticker)
         if not quote:
@@ -1128,15 +1131,19 @@ def api_search():
         cached["quote"]    = quote
         cached["price_ts"] = now
 
+    # Evict oldest entries when cache grows too large
+    if len(_search_cache) > 100:
+        oldest = min(_search_cache, key=lambda k: _search_cache[k].get("price_ts", 0))
+        _search_cache.pop(oldest, None)
     _search_cache[ticker] = cached
 
     entry = _build_stock_entry(q, hist, quote)
     if entry.get("name") == q:
         entry["name"] = quote.get("short_name") or q
-    entry["code"]   = q
-    entry["ticker"] = ticker
-    entry["is_tw"]  = is_tw
-    entry["cached"] = now - cached.get("price_ts", now) < 1   # tells frontend if served from cache
+    entry["code"]        = q
+    entry["ticker"]      = ticker
+    entry["is_tw"]       = is_tw
+    entry["from_cache"]  = price_from_cache   # True = served from cache, False = fresh fetch
     return jsonify(entry)
 
 
