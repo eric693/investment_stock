@@ -694,7 +694,8 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             _cache["foreign_net"] = fn
         chips = _fetch_tw_chips()
         if chips:
-            _cache["tw_chips"] = chips
+            _cache["tw_chips"]  = chips
+            _cache["chips_ts"]  = time.time()
 
         _cache["hist_ts"] = time.time()
 
@@ -760,8 +761,9 @@ def cached_data() -> dict:
     now        = time.time()
     need_hist  = not _cache["histories"] or (now - _cache["hist_ts"])  > HIST_TTL
     need_price = not _cache["stocks"]    or (now - _cache["price_ts"]) > PRICE_TTL
+    need_chips = _cache["tw_chips"] is None or (now - _cache["chips_ts"]) > CHIPS_TTL
 
-    if (not _cache["stocks"] or need_hist or need_price) and not _cache["refreshing"]:
+    if (not _cache["stocks"] or need_hist or need_price or need_chips) and not _cache["refreshing"]:
         is_cold = not _cache["stocks"]
         if is_cold:
             logger.info("Cold start…")
