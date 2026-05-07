@@ -509,14 +509,25 @@ def _fetch_tw_chips() -> dict | None:
 
     result: dict = {}
 
+    _twse_headers = {
+        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept":          "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "zh-TW,zh;q=0.9",
+        "Referer":         "https://www.twse.com.tw/zh/trading/fund/T86.html",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
     # T86: per-stock 外資 / 投信 / 自營商 buy-sell net (shares)
     try:
+        today = datetime.now(TW_TZ).strftime("%Y%m%d")
         resp = requests.get(
             "https://www.twse.com.tw/fund/T86",
-            params={"response": "json", "date": "", "selectType": "ALLBUT0999"},
-            headers={"User-Agent": "Mozilla/5.0"},
+            params={"response": "json", "date": today, "selectType": "ALLBUT0999"},
+            headers=_twse_headers,
             timeout=15,
         )
+        if not resp.text.strip():
+            raise ValueError("empty response from T86")
         data = resp.json()
         if data.get("stat") == "OK":
             fields = data.get("fields", [])
@@ -551,9 +562,11 @@ def _fetch_tw_chips() -> dict | None:
     try:
         resp = requests.get(
             "https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN",
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            headers={**_twse_headers, "Referer": "https://openapi.twse.com.tw/"},
             timeout=15,
         )
+        if not resp.text.strip():
+            raise ValueError("empty response from MI_MARGN")
         for row in resp.json():
             code = row.get("股票代號", "").strip()
             if code in TW_SYMBOLS:
@@ -881,7 +894,9 @@ def compute_sop(stocks: dict) -> dict | None:
     }
 
 
-def check_alerts(stocks: dict, sop: dict) -> list[dict]:
+def check_alerts(stocks: dict, sop: dict | None) -> list[dict]:
+    if not sop:
+        return []
     alerts  = []
     now_str = datetime.now(TW_TZ).isoformat()
     tw  = stocks.get("0050", {})
