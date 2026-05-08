@@ -689,6 +689,9 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
         for name, (sym, exch) in US_SYMBOLS.items():
             _td_throttle()
             hist = _fetch_td_history(sym, exch)
+            if hist is None:
+                logger.warning("TD history failed for %s, trying Yahoo Finance…", name)
+                hist = _fetch_yahoo_history(sym)
             if hist is not None:
                 _cache["histories"][name] = hist
 
@@ -728,6 +731,9 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
         for name, (sym, exch) in US_SYMBOLS.items():
             _td_throttle()
             quote = _fetch_td_quote(sym, exch)
+            if quote is None:
+                logger.warning("TD quote failed for %s, trying Yahoo Finance…", name)
+                quote = _fetch_yahoo_quote(sym)
             hist  = _cache["histories"].get(name)
             if quote and hist is not None:
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
