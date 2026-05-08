@@ -542,7 +542,11 @@ def _fetch_fear_greed() -> dict | None:
     try:
         resp = requests.get(
             "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
-            headers={"User-Agent": "Mozilla/5.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Referer": "https://www.cnn.com/markets/fear-and-greed",
+            },
             timeout=10,
         )
         data  = resp.json()
