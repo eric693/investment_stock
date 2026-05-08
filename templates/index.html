@@ -487,6 +487,72 @@ button { cursor: pointer; font-family: inherit; }
 }
 .fg-scale { display:flex;justify-content:space-between;font-size:9px;color:var(--txt3);margin-top:3px; }
 
+/* ─── Global Strip ────────────────────────────────────────────────────── */
+.global-strip { display:flex; gap:10px; overflow-x:auto; padding:2px 0; scrollbar-width:thin; }
+.global-strip::-webkit-scrollbar { height:3px; }
+.gm-pill {
+  flex-shrink:0; min-width:128px;
+  background:var(--bg2); border:1px solid var(--border); border-top-width:2px;
+  border-radius:10px; padding:10px 14px;
+}
+.gm-name  { font-size:9px; color:var(--txt3); font-weight:600; letter-spacing:.4px; margin-bottom:4px; }
+.gm-price { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700; }
+.gm-chg   { font-family:'JetBrains Mono',monospace; font-size:10px; margin-top:2px; }
+
+/* ─── Mid row (Portfolio + DCA) ───────────────────────────────────────── */
+.mid-row { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
+@media (max-width:900px) { .mid-row { grid-template-columns:1fr; } }
+
+/* ─── Portfolio table ─────────────────────────────────────────────────── */
+.ptable { width:100%; border-collapse:collapse; font-size:11px; }
+.ptable th {
+  text-align:right; padding:5px 10px; color:var(--txt3);
+  font-size:9px; font-weight:600; letter-spacing:.3px; border-bottom:1px solid var(--border);
+}
+.ptable th:first-child { text-align:left; }
+.ptable td {
+  text-align:right; padding:6px 10px; border-bottom:1px solid var(--border);
+  font-family:'JetBrains Mono',monospace; font-size:11px;
+}
+.ptable td:first-child { text-align:left; font-family:'Inter',sans-serif; font-weight:700; }
+.ptable tfoot td { border-top:1px solid var(--border2) !important; border-bottom:none; font-size:12px; }
+.ptable tr:hover td { background:var(--bg3); }
+
+/* ─── DCA form ────────────────────────────────────────────────────────── */
+.dca-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+.dca-label { font-size:10px; color:var(--txt3); margin-bottom:3px; display:block; }
+.dca-input {
+  background:var(--bg3); border:1px solid var(--border2); border-radius:6px;
+  color:var(--txt1); font-family:'JetBrains Mono',monospace;
+  font-size:12px; padding:5px 10px; width:100%; outline:none; box-sizing:border-box;
+}
+.dca-input:focus { border-color:var(--cyan); }
+
+/* ─── Backtest ────────────────────────────────────────────────────────── */
+.bt-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+@media (max-width:700px) { .bt-summary { grid-template-columns:1fr 1fr; } }
+.bt-card {
+  background:var(--bg3); border:1px solid var(--border); border-radius:9px; padding:10px 14px;
+}
+.bt-card-label { font-size:9px; color:var(--txt3); font-weight:600; margin-bottom:4px; letter-spacing:.3px; }
+.bt-card-val   { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; }
+.bt-events { max-height:220px; overflow-y:auto; }
+.bt-ev-row {
+  display:flex; gap:8px; align-items:flex-start;
+  padding:6px 0; border-bottom:1px solid var(--border); font-size:11px;
+}
+.bt-ev-row:last-child { border-bottom:none; }
+.bt-ev-date { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--txt3); flex-shrink:0; width:76px; }
+.bt-dot-s { width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;margin-top:3px; }
+.bt-dot-b { width:6px;height:6px;border-radius:50%;background:var(--red);  flex-shrink:0;margin-top:3px; }
+
+/* ─── Portfolio modal select ──────────────────────────────────────────── */
+.pf-select {
+  background:var(--bg3); border:1px solid var(--border2); border-radius:6px;
+  color:var(--txt1); font-size:13px; font-weight:600; padding:4px 10px;
+  width:120px; outline:none;
+}
+
 /* ─── Settings modal ──────────────────────────────────────────────────── */
 .settings-overlay {
   display:none; position:fixed; inset:0; z-index:200;
@@ -580,6 +646,9 @@ button { cursor: pointer; font-family: inherit; }
 <!-- ─── Page ──────────────────────────────────────────────────────────────── -->
 <div class="page">
 
+  <!-- Global Markets Strip -->
+  <div class="global-strip" id="globalStrip"></div>
+
   <!-- Stock cards -->
   <div class="stock-grid" id="stockGrid">
     <div class="sk"><div class="spin"></div></div>
@@ -664,6 +733,66 @@ button { cursor: pointer; font-family: inherit; }
     </div>
   </div>
 
+  <!-- Portfolio + DCA Row -->
+  <div class="mid-row">
+
+    <!-- Portfolio Tracking -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">持股損益追蹤</span>
+        <button class="btn btn-ghost" onclick="openPortfolioForm()" style="padding:4px 10px;font-size:11px">+ 新增</button>
+      </div>
+      <div id="portfolioPanel" style="overflow-x:auto">
+        <div class="empty-box">尚未新增持股，點「+ 新增」開始追蹤</div>
+      </div>
+    </div>
+
+    <!-- DCA Calculator -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">定期定額試算</span>
+      </div>
+      <div class="panel-body">
+        <div class="dca-grid">
+          <div>
+            <label class="dca-label">標的代號</label>
+            <input class="dca-input" id="dcaSym" value="0050" placeholder="0050" style="text-transform:uppercase">
+          </div>
+          <div>
+            <label class="dca-label">每月投入金額</label>
+            <input class="dca-input" id="dcaMonthly" type="number" value="10000" min="1">
+          </div>
+          <div>
+            <label class="dca-label">起始年月</label>
+            <input class="dca-input dca-month" id="dcaStart" type="month">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="calcDca()" style="width:100%;justify-content:center">開始試算</button>
+          </div>
+        </div>
+        <div id="dcaResults"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SOP Backtest Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">SOP 策略回測</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">SOP03/04/05 歷史訊號模擬</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="dca-input" id="btSym" value="0050" style="width:70px;text-align:center;text-transform:uppercase">
+        <input class="dca-input" id="btCapital" type="number" value="1000000" style="width:120px;text-align:right" placeholder="初始資金">
+        <button class="btn btn-ghost" onclick="runBacktest()">開始回測</button>
+      </div>
+    </div>
+    <div class="panel-body" id="backtestPanel">
+      <div class="empty-box">輸入參數後點「開始回測」查看歷史訊號模擬結果</div>
+    </div>
+  </div>
+
   <!-- Bottom row -->
   <div class="bottom-row">
 
@@ -699,6 +828,36 @@ button { cursor: pointer; font-family: inherit; }
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- Portfolio Form Modal -->
+<div class="settings-overlay" id="pfOverlay" onclick="closePfOverlay(event)">
+  <div class="settings-modal">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <span style="font-size:15px;font-weight:700">新增持股</span>
+      <button onclick="closePfModal()" style="background:none;border:none;color:var(--txt3);font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div class="settings-row">
+      <span class="settings-lbl">股票代號</span>
+      <select class="pf-select" id="pfSym">
+        <option>0050</option><option>00631L</option><option>00662</option><option>00865B</option>
+        <option>QQQ</option><option>QLD</option><option>GOOG</option><option>NVDA</option><option>TSLA</option>
+      </select>
+    </div>
+    <div class="settings-row">
+      <span class="settings-lbl">買入成本（每股）</span>
+      <input class="settings-input" type="number" id="pfCost" min="0.01" step="0.01" placeholder="0.00">
+    </div>
+    <div class="settings-row" style="border-bottom:none">
+      <span class="settings-lbl">持有股數</span>
+      <input class="settings-input" type="number" id="pfShares" min="1" step="1" placeholder="1000">
+    </div>
+    <div style="margin-top:10px;font-size:10px;color:var(--txt3);line-height:1.7;padding:8px 10px;background:var(--bg3);border-radius:8px">
+      台股單位：股（1張＝1000股）；美股單位：股<br>
+      損益以現行 USD/TWD 匯率換算台幣
+    </div>
+    <button onclick="savePosition()" class="btn btn-primary" style="width:100%;margin-top:16px;justify-content:center">新增持股</button>
   </div>
 </div>
 
@@ -827,6 +986,7 @@ function render() {
 
   usdTwd = state.usdtwd || null;
   renderUsdTwd(state.usdtwd);
+  renderGlobalMarkets(state.global_quotes);
   renderStockGrid(state.stocks);
   renderSOP(state.sop);
   renderAlerts(state.alerts, state.alert_history);
@@ -835,6 +995,22 @@ function render() {
   renderMarketSentiment(state.vix, state.foreign_net, state.fear_greed);
   renderCashBot(cbBasePct);
   renderChips(state.tw_chips);
+  renderPortfolio();
+}
+
+/* ── Global Markets ── */
+function renderGlobalMarkets(data) {
+  const el = document.getElementById('globalStrip');
+  if (!el || !data || !Object.keys(data).length) return;
+  el.innerHTML = Object.entries(data).map(([ticker, q]) => {
+    const dc = q.daily_change;
+    const top = dc > 0 ? 'var(--red)' : dc < 0 ? 'var(--green)' : 'var(--border2)';
+    return `<div class="gm-pill" style="border-top-color:${top}">
+      <div class="gm-name">${q.name || ticker}</div>
+      <div class="gm-price ${cls(dc)}">${f(q.price)}</div>
+      <div class="gm-chg ${cls(dc)}">${fc(dc)}</div>
+    </div>`;
+  }).join('');
 }
 
 /* ── USD/TWD ── */
@@ -1608,6 +1784,163 @@ function onCbSlider(val) {
   renderCashBot(cbBasePct);
 }
 
+/* ─── Portfolio Tracking ─────────────────────────────────────────────────── */
+let portfolio = JSON.parse(localStorage.getItem('portfolio') || '[]');
+const TW_STOCKS = new Set(['0050','00631L','00662','00865B']);
+
+function openPortfolioForm() {
+  document.getElementById('pfCost').value = '';
+  document.getElementById('pfShares').value = '';
+  document.getElementById('pfOverlay').classList.add('open');
+}
+function closePfModal()    { document.getElementById('pfOverlay').classList.remove('open'); }
+function closePfOverlay(e) { if (e.target === document.getElementById('pfOverlay')) closePfModal(); }
+
+function savePosition() {
+  const sym    = document.getElementById('pfSym').value;
+  const cost   = parseFloat(document.getElementById('pfCost').value);
+  const shares = parseFloat(document.getElementById('pfShares').value);
+  if (!sym || isNaN(cost) || cost <= 0 || isNaN(shares) || shares <= 0) {
+    toast('請填寫所有欄位，且數值須大於 0', false); return;
+  }
+  portfolio.push({ sym, cost, shares });
+  localStorage.setItem('portfolio', JSON.stringify(portfolio));
+  closePfModal(); renderPortfolio(); toast(`已新增 ${sym} 持股`);
+}
+
+function deletePosition(idx) {
+  portfolio.splice(idx, 1);
+  localStorage.setItem('portfolio', JSON.stringify(portfolio));
+  renderPortfolio();
+}
+
+function renderPortfolio() {
+  const panel = document.getElementById('portfolioPanel');
+  if (!panel) return;
+  if (!portfolio.length) {
+    panel.innerHTML = '<div class="empty-box">尚未新增持股，點「+ 新增」開始追蹤</div>'; return;
+  }
+  let totalCostTwd = 0, totalValueTwd = 0;
+  const rows = portfolio.map((pos, idx) => {
+    const s     = state?.stocks?.[pos.sym];
+    const price = s?.price ?? null;
+    const isTw  = TW_STOCKS.has(pos.sym);
+    const rate  = (!isTw && usdTwd) ? usdTwd.rate : (isTw ? 1 : null);
+    const costT  = rate != null ? pos.cost * pos.shares * rate : null;
+    const valueT = (price != null && rate != null) ? price * pos.shares * rate : null;
+    const pnl  = (costT != null && valueT != null) ? valueT - costT : null;
+    const pct  = (pnl != null && costT) ? pnl / costT * 100 : null;
+    if (valueT != null) { totalCostTwd += costT; totalValueTwd += valueT; }
+    return `<tr>
+      <td style="color:var(--cyan)">${pos.sym}</td>
+      <td>${f(pos.cost,2)}</td>
+      <td>${pos.shares.toLocaleString()}</td>
+      <td>${price != null ? f(price,2) : '-'}</td>
+      <td class="${cls(pnl)}">${pnl != null ? 'NT$'+Math.round(pnl).toLocaleString() : '-'}</td>
+      <td class="${cls(pct)}">${pct != null ? fc(pct) : '-'}</td>
+      <td><button onclick="deletePosition(${idx})" style="background:none;border:none;color:var(--txt3);cursor:pointer;font-size:16px">×</button></td>
+    </tr>`;
+  }).join('');
+  const totalPnl = totalValueTwd - totalCostTwd;
+  const totalPct = totalCostTwd ? totalPnl / totalCostTwd * 100 : null;
+  panel.innerHTML = `
+    <table class="ptable">
+      <thead><tr><th>代號</th><th>成本/股</th><th>股數</th><th>現價</th><th>損益(TWD)</th><th>報酬率</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+      ${totalCostTwd ? `<tfoot><tr>
+        <td colspan="4" style="text-align:left;font-weight:600;color:var(--txt2)">合計 (TWD)</td>
+        <td class="${cls(totalPnl)}" style="font-weight:700">NT$${Math.round(totalPnl).toLocaleString()}</td>
+        <td class="${cls(totalPct)}" style="font-weight:700">${fc(totalPct)}</td><td></td>
+      </tr></tfoot>` : ''}
+    </table>`;
+}
+
+/* ─── DCA Calculator ────────────────────────────────────────────────────── */
+async function calcDca() {
+  const sym     = (document.getElementById('dcaSym').value || '0050').trim().toUpperCase();
+  const monthly = parseFloat(document.getElementById('dcaMonthly').value);
+  const start   = document.getElementById('dcaStart').value;
+  if (isNaN(monthly) || monthly <= 0) { toast('請輸入有效金額', false); return; }
+  const el = document.getElementById('dcaResults');
+  el.innerHTML = '<div class="sk" style="padding:16px"><div class="spin"></div></div>';
+  try {
+    const r = await fetch(`/api/dca?sym=${encodeURIComponent(sym)}&monthly=${monthly}${start?'&start='+encodeURIComponent(start):''}`);
+    const d = await r.json();
+    if (d.error) { el.innerHTML = `<div class="empty-box" style="color:var(--red)">${d.error}</div>`; return; }
+    const isTw = TW_STOCKS.has(d.sym);
+    const curr = isTw ? 'NT$' : 'USD ';
+    el.innerHTML = `
+      <hr class="scard-divider">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div class="bt-card"><div class="bt-card-label">總投入</div><div class="bt-card-val" style="font-size:16px">${curr}${d.total_invested.toLocaleString()}</div></div>
+        <div class="bt-card"><div class="bt-card-label">目前總值</div><div class="bt-card-val ${cls(d.profit)}" style="font-size:16px">${curr}${d.current_value.toLocaleString()}</div></div>
+        <div class="bt-card"><div class="bt-card-label">未實現損益</div><div class="bt-card-val ${cls(d.profit)}" style="font-size:16px">${d.profit>=0?'+':''}${curr}${d.profit.toLocaleString()}</div></div>
+        <div class="bt-card"><div class="bt-card-label">年化報酬率</div><div class="bt-card-val ${cls(d.cagr)}" style="font-size:16px">${fc(d.cagr)}</div></div>
+      </div>
+      <div class="scard-metrics">
+        <div class="metric-row"><span class="metric-lbl">累積股數</span><span class="metric-val">${d.total_shares.toLocaleString()}</span></div>
+        <div class="metric-row"><span class="metric-lbl">平均每股成本</span><span class="metric-val">${curr}${f(d.avg_cost)}</span></div>
+        <div class="metric-row"><span class="metric-lbl">現價</span><span class="metric-val">${curr}${f(d.current_price)}</span></div>
+        <div class="metric-row"><span class="metric-lbl">總報酬率</span><span class="metric-val ${cls(d.return_pct)}">${fc(d.return_pct)}</span></div>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = '<div class="empty-box" style="color:var(--red)">請求失敗，請重試</div>';
+  }
+}
+
+/* ─── SOP Backtest ──────────────────────────────────────────────────────── */
+async function runBacktest() {
+  const sym     = (document.getElementById('btSym').value || '0050').trim().toUpperCase();
+  const capital = parseFloat(document.getElementById('btCapital').value) || 1000000;
+  const el      = document.getElementById('backtestPanel');
+  el.innerHTML  = '<div class="sk" style="padding:20px"><div class="spin"></div></div>';
+  try {
+    const r = await fetch(`/api/backtest?sym=${encodeURIComponent(sym)}&capital=${capital}`);
+    const d = await r.json();
+    if (d.error) { el.innerHTML = `<div class="empty-box" style="color:var(--red)">${d.error}</div>`; return; }
+    const isTw  = TW_STOCKS.has(sym);
+    const curr  = isTw ? 'NT$' : 'USD ';
+    const beats = d.return_pct >= d.bnh_return;
+    const evHtml = d.events.length
+      ? [...d.events].reverse().map(ev => `
+        <div class="bt-ev-row">
+          <span class="bt-ev-date">${ev.date}</span>
+          <div class="${ev.type==='SELL'?'bt-dot-s':'bt-dot-b'}"></div>
+          <span style="color:var(--txt2);flex:1">${ev.desc}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--txt3)">${f(ev.price)}</span>
+        </div>`).join('')
+      : '<div class="empty-box">回測期間未觸發任何訊號</div>';
+    el.innerHTML = `
+      <div class="bt-summary">
+        <div class="bt-card">
+          <div class="bt-card-label">SOP 最終資產</div>
+          <div class="bt-card-val ${cls(d.return_pct)}">${curr}${d.final_value.toLocaleString()}</div>
+          <div style="font-size:10px;margin-top:3px;color:var(--txt3)">${fc(d.return_pct)} / 年化 ${fc(d.cagr)}</div>
+        </div>
+        <div class="bt-card">
+          <div class="bt-card-label">買進持有 (80%)</div>
+          <div class="bt-card-val ${cls(d.bnh_return)}">${fc(d.bnh_return)}</div>
+          <div style="font-size:10px;margin-top:3px;color:var(--txt3)">年化 ${fc(d.bnh_cagr)}</div>
+        </div>
+        <div class="bt-card">
+          <div class="bt-card-label">策略評估</div>
+          <div class="bt-card-val" style="font-size:14px;color:${beats?'var(--red)':'var(--green)'}">${beats?'優於買進持有':'落後買進持有'}</div>
+          <div style="font-size:10px;margin-top:3px;color:var(--txt3)">${d.trades} 筆訊號 · ${d.days} 天</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">
+        期間：${d.start_date} ～ ${d.end_date}　初始 ${curr}${(d.capital/10000).toFixed(0)}萬（80% 建倉）
+      </div>
+      <div style="font-size:10px;color:var(--txt3);font-weight:600;letter-spacing:.3px;margin-bottom:6px">訊號紀錄（最新優先）</div>
+      <div class="bt-events">${evHtml}</div>
+      <div style="font-size:9px;color:var(--txt3);margin-top:10px;line-height:1.6;padding:6px 10px;background:var(--bg3);border-radius:6px">
+        ⚠ 回測僅模擬 SOP03/04/05，不含 SOP02 QQQ 雙核雷達。歷史表現不代表未來績效。
+      </div>`;
+  } catch(e) {
+    el.innerHTML = '<div class="empty-box" style="color:var(--red)">請求失敗，請重試</div>';
+  }
+}
+
 /* ─── Settings ────────────────────────────────────────────────────────────── */
 function loadSettings() {
   return {
@@ -1644,10 +1977,13 @@ function saveSettings() {
 /* ─── Init ────────────────────────────────────────────────────────────────── */
 document.getElementById('cbSlider').value    = cbBasePct;
 document.getElementById('cbBaseLabel').textContent = cbBasePct + '%';
+// DCA default start: 2 years ago
+const _2yAgo = new Date(); _2yAgo.setFullYear(_2yAgo.getFullYear() - 2);
+document.getElementById('dcaStart').value = _2yAgo.toISOString().slice(0, 7);
 loadData();
 setInterval(loadData, 5 * 60 * 1000);
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeSearchModal(); closeSettingsModal(); }
+  if (e.key === 'Escape') { closeSearchModal(); closeSettingsModal(); closePfModal(); }
 });
 </script>
 </body>

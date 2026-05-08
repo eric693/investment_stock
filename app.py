@@ -65,8 +65,10 @@ _cache = {
     "chips_ts":      0.0,
     "usdtwd":        None,
     "usdtwd_ts":     0.0,
-    "fear_greed":    None,
-    "fear_greed_ts": 0.0,
+    "fear_greed":       None,
+    "fear_greed_ts":    0.0,
+    "global_quotes":    {},
+    "global_quotes_ts": 0.0,
     "refreshing":  False,
     "vix":         None,
     "foreign_net": None,
@@ -76,6 +78,14 @@ VIX_TTL    = 1800   # 30 min — VIX updates intraday but not per-minute
 CHIPS_TTL  = 7200   # 2 hours — TWSE chips published once daily ~14:30
 USDTWD_TTL = 1800   # 30 min
 FG_TTL     = 3600   # 1 hour — CNN Fear & Greed updates a few times daily
+GLOBAL_TTL = 1800   # 30 min
+GLOBAL_SYMBOLS = {
+    "^TWII": "台灣加權",
+    "^N225": "日經225",
+    "^GSPC": "S&P 500",
+    "^IXIC": "那斯達克",
+    "SOXX":  "費半ETF",
+}
 _refresh_lock = threading.Lock()
 alert_history: list = []
 _line_users: dict = {}
@@ -550,6 +560,105 @@ def _fetch_fear_greed() -> dict | None:
         return None
 
 
+# ─── 全球大盤即時報價 ─────────────────────────────────────────────────────────────
+def _fetch_global_quotes() -> dict:
+    result = {}
+    for ticker, name in GLOBAL_SYMBOLS.items():
+        q = _fetch_yahoo_quote(ticker)
+        if q:
+            result[ticker] = {**q, "name": name}
+        time.sleep(0.4)
+    logger.info("Global quotes: %s", list(result.keys()))
+    return result
+
+
+# ─── SOP 回測 ────────────────────────────────────────────────────────────────
+def _run_sop_backtest(hist: pd.DataFrame, capital: float) -> dict:
+    df = hist[["Close", "MA200"]].copy().dropna(subset=["MA200"])
+    if len(df) < 30:
+        return {"error": "歷史資料不足（需至少 30 個交易日含 MA200）"}
+    df["daily_chg"] = df["Close"].pct_change() * 100
+    df["vs_ma200"]  = (df["Close"] - df["MA200"]) / df["MA200"] * 100
+
+    cash        = capital * 0.20
+    shares      = (capital * 0.80) / float(df["Close"].iloc[0])
+    events      = []
+    pv_list     = []
+    below3_n    = 0
+    above3_n    = 0
+    bought_lvls: set = set()   # smile levels bought in current holding period
+    SMILE_THRS  = [-8, -10, -15, -20, -25, -30]
+
+    for i, (date_idx, row) in enumerate(df.iterrows()):
+        price  = float(row["Close"])
+        vs_ma  = float(row["vs_ma200"]) if pd.notna(row["vs_ma200"]) else 0
+        d_chg  = float(row["daily_chg"]) if i > 0 and pd.notna(row["daily_chg"]) else 0
+        date_s = date_idx.strftime("%Y-%m-%d")
+        exited_today = False
+
+        below3_n = below3_n + 1 if vs_ma < -3 else 0
+        above3_n = above3_n + 1 if vs_ma >  3 else 0
+
+        # SOP03: retreat
+        if shares > 0 and (d_chg <= -5 or below3_n >= 3):
+            cash += shares * price
+            events.append({
+                "date": date_s, "type": "SELL", "price": round(price, 2),
+                "desc": f"SOP03 {'單日暴跌' + str(round(d_chg,1)) + '%' if d_chg <= -5 else '連3日跌破年線-3%'} → 清倉",
+            })
+            shares = 0; bought_lvls = set(); exited_today = True
+
+        # SOP04: smile buying levels
+        for j, thr in enumerate(SMILE_THRS):
+            if vs_ma <= thr and (j == len(SMILE_THRS) - 1 or vs_ma > SMILE_THRS[j + 1]):
+                if thr not in bought_lvls and cash >= capital * 0.03:
+                    bought_lvls.add(thr)
+                    amt = min(cash * 0.05, cash)
+                    shares += amt / price; cash -= amt
+                    events.append({
+                        "date": date_s, "type": "BUY", "price": round(price, 2),
+                        "desc": f"SOP04 微笑佈局 年線{thr}% → 加碼 5% 資金",
+                    })
+                break
+
+        # SOP05: recovery
+        if not exited_today and shares == 0 and above3_n >= 3 and cash > 0:
+            new_sh = (cash * 0.90) / price
+            events.append({
+                "date": date_s, "type": "BUY", "price": round(price, 2),
+                "desc": f"SOP05 反攻號角連3日 → 重倉進場 90% 資金",
+            })
+            shares = new_sh; cash *= 0.10; bought_lvls = set()
+
+        pv_list.append({"d": date_s, "v": round(shares * price + cash)})
+
+    final_price = float(df["Close"].iloc[-1])
+    final_val   = shares * final_price + cash
+    ret_pct     = (final_val - capital) / capital * 100
+    days        = max((df.index[-1] - df.index[0]).days, 1)
+    cagr        = ((final_val / capital) ** (365.0 / days) - 1) * 100
+
+    bnh_sh   = (capital * 0.80) / float(df["Close"].iloc[0])
+    bnh_val  = bnh_sh * final_price + capital * 0.20
+    bnh_ret  = (bnh_val - capital) / capital * 100
+    bnh_cagr = ((bnh_val / capital) ** (365.0 / days) - 1) * 100
+
+    return {
+        "capital":     capital,
+        "final_value": round(final_val),
+        "return_pct":  round(ret_pct, 2),
+        "cagr":        round(cagr, 2),
+        "bnh_return":  round(bnh_ret, 2),
+        "bnh_cagr":    round(bnh_cagr, 2),
+        "events":      events,
+        "chart":       pv_list,
+        "start_date":  df.index[0].strftime("%Y-%m-%d"),
+        "end_date":    df.index[-1].strftime("%Y-%m-%d"),
+        "days":        days,
+        "trades":      len(events),
+    }
+
+
 # ─── 台股籌碼：三大法人 + 融資融券 ───────────────────────────────────────────────
 def _fetch_tw_chips() -> dict | None:
     """Fetch per-stock 三大法人 (T86) and 融資融券 (MI_MARGN) for TW ETFs."""
@@ -772,6 +881,12 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
         if fg:
             _cache["fear_greed"] = fg
 
+        logger.info("Refreshing global quotes…")
+        gq = _fetch_global_quotes()
+        if gq:
+            _cache["global_quotes"]    = gq
+            _cache["global_quotes_ts"] = time.time()
+
         _cache["hist_ts"] = time.time()
 
     if refresh_price:
@@ -829,6 +944,12 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             if fg:
                 _cache["fear_greed"]    = fg
                 _cache["fear_greed_ts"] = now_t
+
+        if now_t - _cache["global_quotes_ts"] > GLOBAL_TTL:
+            gq = _fetch_global_quotes()
+            if gq:
+                _cache["global_quotes"]    = gq
+                _cache["global_quotes_ts"] = now_t
 
         _cache["price_ts"] = now_t
 
@@ -1127,6 +1248,7 @@ def api_dashboard():
             "tw_chips":      _cache.get("tw_chips"),
             "usdtwd":        _cache.get("usdtwd"),
             "fear_greed":    _cache.get("fear_greed"),
+            "global_quotes": _cache.get("global_quotes", {}),
         })
     except Exception as exc:
         logger.exception("Dashboard error")
@@ -1256,6 +1378,86 @@ def api_search():
     entry["is_tw"]       = is_tw
     entry["from_cache"]  = price_from_cache   # True = served from cache, False = fresh fetch
     return jsonify(entry)
+
+
+@app.route("/api/backtest")
+def api_backtest():
+    sym = request.args.get("sym", "0050").upper()
+    try:
+        capital = float(request.args.get("capital", "1000000"))
+    except (ValueError, TypeError):
+        capital = 1_000_000
+    hist = _cache["histories"].get(sym)
+    if hist is None:
+        return jsonify({"error": f"{sym} 歷史資料未載入，請稍後再試"}), 404
+    return jsonify(_run_sop_backtest(hist, capital))
+
+
+@app.route("/api/dca")
+def api_dca():
+    import re as _re
+    sym = request.args.get("sym", "0050").upper()
+    try:    monthly = float(request.args.get("monthly", "10000"))
+    except: monthly = 10000.0
+    start_str = request.args.get("start", "")
+
+    hist = _cache["histories"].get(sym)
+    if hist is None:
+        return jsonify({"error": f"{sym} 歷史資料未載入"}), 404
+
+    hist_c = hist.dropna(subset=["Close"])
+    if hist_c.empty:
+        return jsonify({"error": "無有效歷史資料"}), 404
+
+    today = datetime.now(TW_TZ).date()
+    if _re.match(r"^\d{4}-\d{2}$", start_str):
+        sy, sm = int(start_str[:4]), int(start_str[5:7])
+    else:
+        sy = today.year - 2; sm = today.month
+
+    rows: list = []
+    total_invested = 0.0
+    total_shares   = 0.0
+    y, m = sy, sm
+
+    while (y < today.year) or (y == today.year and m <= today.month):
+        month_data = hist_c[(hist_c.index.year == y) & (hist_c.index.month == m)]
+        if not month_data.empty:
+            price = float(month_data["Close"].iloc[0])
+            bought = monthly / price
+            total_shares   += bought
+            total_invested += monthly
+            rows.append({"ym": f"{y}-{m:02d}", "price": round(price, 2),
+                         "shares": round(bought, 4), "cum_cost": round(total_invested, 0)})
+        m += 1
+        if m > 12: m = 1; y += 1
+
+    if not rows:
+        return jsonify({"error": "指定期間內無資料，請調整起始月份"}), 404
+
+    current_price = float(hist_c["Close"].iloc[-1])
+    current_value = total_shares * current_price
+    profit        = current_value - total_invested
+    ret_pct       = profit / total_invested * 100 if total_invested else 0
+    avg_cost      = total_invested / total_shares  if total_shares   else 0
+
+    from datetime import date as _date
+    span_d = max((_date(today.year, today.month, 1) - _date(sy, sm, 1)).days, 1)
+    cagr   = ((current_value / total_invested) ** (365.0 / span_d) - 1) * 100 if total_invested else 0
+
+    return jsonify({
+        "sym":            sym,
+        "monthly":        monthly,
+        "total_invested": round(total_invested),
+        "total_shares":   round(total_shares, 4),
+        "current_price":  round(current_price, 2),
+        "current_value":  round(current_value),
+        "profit":         round(profit),
+        "return_pct":     round(ret_pct, 2),
+        "cagr":           round(cagr, 2),
+        "avg_cost":       round(avg_cost, 2),
+        "rows":           rows[-24:],
+    })
 
 
 if __name__ == "__main__":
