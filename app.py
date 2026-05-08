@@ -62,14 +62,20 @@ _cache = {
     "hist_ts":     0.0,
     "price_ts":    0.0,
     "vix_ts":      0.0,
-    "chips_ts":    0.0,
+    "chips_ts":      0.0,
+    "usdtwd":        None,
+    "usdtwd_ts":     0.0,
+    "fear_greed":    None,
+    "fear_greed_ts": 0.0,
     "refreshing":  False,
     "vix":         None,
     "foreign_net": None,
     "tw_chips":    None,
 }
-VIX_TTL   = 1800    # 30 min — VIX updates intraday but not per-minute
-CHIPS_TTL = 7200    # 2 hours — TWSE chips published once daily ~14:30
+VIX_TTL    = 1800   # 30 min — VIX updates intraday but not per-minute
+CHIPS_TTL  = 7200   # 2 hours — TWSE chips published once daily ~14:30
+USDTWD_TTL = 1800   # 30 min
+FG_TTL     = 3600   # 1 hour — CNN Fear & Greed updates a few times daily
 _refresh_lock = threading.Lock()
 alert_history: list = []
 _line_users: dict = {}
@@ -498,6 +504,52 @@ def _fetch_foreign_net() -> dict | None:
         return None
 
 
+# ─── USD/TWD 匯率 ─────────────────────────────────────────────────────────────
+def _fetch_usdtwd() -> dict | None:
+    try:
+        data   = _yahoo_get("https://query1.finance.yahoo.com/v8/finance/chart/USDTWD=X",
+                            {"interval": "1d", "range": "5d"})
+        result = (data or {}).get("chart", {}).get("result", [])
+        if not result:
+            return None
+        meta  = result[0].get("meta", {})
+        price = meta.get("regularMarketPrice") or meta.get("previousClose")
+        prev  = meta.get("previousClose") or price
+        if not price:
+            return None
+        return {
+            "rate":   round(float(price), 3),
+            "prev":   round(float(prev),  3),
+            "change": round((float(price) - float(prev)) / float(prev) * 100, 2) if prev else 0.0,
+        }
+    except Exception as exc:
+        logger.error("USDTWD fetch error: %s", exc)
+        return None
+
+
+# ─── CNN 恐貪指數 ──────────────────────────────────────────────────────────────
+def _fetch_fear_greed() -> dict | None:
+    try:
+        resp = requests.get(
+            "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        data  = resp.json()
+        fg    = data.get("fear_and_greed", {})
+        score = fg.get("score")
+        if score is None:
+            return None
+        return {
+            "score":     round(float(score), 1),
+            "rating":    fg.get("rating", ""),
+            "prev_week": round(float(fg["previous_1_week"]), 1) if fg.get("previous_1_week") else None,
+        }
+    except Exception as exc:
+        logger.error("Fear & Greed fetch error: %s", exc)
+        return None
+
+
 # ─── 台股籌碼：三大法人 + 融資融券 ───────────────────────────────────────────────
 def _fetch_tw_chips() -> dict | None:
     """Fetch per-stock 三大法人 (T86) and 融資融券 (MI_MARGN) for TW ETFs."""
@@ -713,6 +765,13 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             _cache["tw_chips"]  = chips
             _cache["chips_ts"]  = time.time()
 
+        usdtwd = _fetch_usdtwd()
+        if usdtwd:
+            _cache["usdtwd"] = usdtwd
+        fg = _fetch_fear_greed()
+        if fg:
+            _cache["fear_greed"] = fg
+
         _cache["hist_ts"] = time.time()
 
     if refresh_price:
@@ -758,6 +817,18 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             if chips:
                 _cache["tw_chips"]  = chips
                 _cache["chips_ts"]  = now_t
+
+        if now_t - _cache["usdtwd_ts"] > USDTWD_TTL:
+            usdtwd = _fetch_usdtwd()
+            if usdtwd:
+                _cache["usdtwd"]    = usdtwd
+                _cache["usdtwd_ts"] = now_t
+
+        if now_t - _cache["fear_greed_ts"] > FG_TTL:
+            fg = _fetch_fear_greed()
+            if fg:
+                _cache["fear_greed"]    = fg
+                _cache["fear_greed_ts"] = now_t
 
         _cache["price_ts"] = now_t
 
@@ -1054,6 +1125,8 @@ def api_dashboard():
             "vix":           _cache.get("vix"),
             "foreign_net":   _cache.get("foreign_net"),
             "tw_chips":      _cache.get("tw_chips"),
+            "usdtwd":        _cache.get("usdtwd"),
+            "fear_greed":    _cache.get("fear_greed"),
         })
     except Exception as exc:
         logger.exception("Dashboard error")

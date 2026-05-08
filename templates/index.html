@@ -472,6 +472,44 @@ button { cursor: pointer; font-family: inherit; }
 }
 @media (max-width:900px) { .cb-top-grid { grid-template-columns:1fr 1fr; } }
 @media (max-width:600px) { .cb-top-grid { grid-template-columns:1fr; } }
+
+/* ─── Fear & Greed gauge ──────────────────────────────────────────────── */
+.fg-gradient-bar {
+  height:6px; border-radius:3px; position:relative; margin:6px 0 0;
+  background:linear-gradient(to right,#22c55e,#86efac 25%,#eab308 50%,#fb923c 75%,#ef4444);
+}
+.fg-needle {
+  position:absolute; top:-3px;
+  width:12px; height:12px; border-radius:50%;
+  background:#fff; border:2px solid var(--bg0);
+  transform:translateX(-50%);
+  transition:left .5s;
+}
+.fg-scale { display:flex;justify-content:space-between;font-size:9px;color:var(--txt3);margin-top:3px; }
+
+/* ─── Settings modal ──────────────────────────────────────────────────── */
+.settings-overlay {
+  display:none; position:fixed; inset:0; z-index:200;
+  background:rgba(8,12,20,.85); backdrop-filter:blur(4px);
+  align-items:flex-start; justify-content:center; padding-top:80px;
+}
+.settings-overlay.open { display:flex; }
+.settings-modal {
+  background:var(--bg2); border:1px solid var(--border2); border-radius:14px;
+  width:min(400px,90vw); padding:22px 24px;
+}
+.settings-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:10px 0; border-bottom:1px solid var(--border);
+}
+.settings-lbl { font-size:12px; color:var(--txt2); }
+.settings-input {
+  background:var(--bg3); border:1px solid var(--border2); border-radius:6px;
+  color:var(--txt1); font-family:'JetBrains Mono',monospace;
+  font-size:13px; font-weight:600; padding:4px 10px;
+  width:70px; text-align:center; outline:none;
+}
+.settings-input:focus { border-color:var(--cyan); }
 </style>
 </head>
 <body>
@@ -496,6 +534,11 @@ button { cursor: pointer; font-family: inherit; }
       更新：<span id="updatedAt">載入中…</span>
       &ensp;|&ensp;快取：<span id="cacheAge">-</span>s 前
     </div>
+    <div class="meta-pill" id="usdtwdPill" style="display:none">
+      <span style="color:var(--txt3)">USD/TWD</span>
+      &ensp;<span id="usdtwdRate" style="font-family:'JetBrains Mono',monospace;font-weight:600">-</span>
+      &ensp;<span id="usdtwdChg" class="neu">-</span>
+    </div>
   </div>
 
   <div class="search-wrap">
@@ -517,6 +560,13 @@ button { cursor: pointer; font-family: inherit; }
         <path d="M14 2v4h-4" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       重新整理
+    </button>
+    <button class="btn btn-ghost" onclick="openSettings()">
+      <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="8" cy="8" r="2.2"/>
+        <path d="M8 1.5v1.2M8 13.3v1.2M1.5 8h1.2M13.3 8h1.2M3.4 3.4l.85.85M11.75 11.75l.85.85M3.4 12.6l.85-.85M11.75 4.25l.85-.85" stroke-linecap="round"/>
+      </svg>
+      設定
     </button>
     <button class="btn btn-primary" onclick="testNotify()">
       <svg class="btn-icon" viewBox="0 0 16 16" fill="currentColor">
@@ -652,6 +702,30 @@ button { cursor: pointer; font-family: inherit; }
   </div>
 </div>
 
+<!-- Settings modal -->
+<div class="settings-overlay" id="settingsOverlay" onclick="closeSettings(event)">
+  <div class="settings-modal" id="settingsModal">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <span style="font-size:15px;font-weight:700">警報閾值設定</span>
+      <button onclick="closeSettingsModal()" style="background:none;border:none;color:var(--txt3);font-size:18px;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <div class="settings-row">
+      <span class="settings-lbl">RSI 超買閾值（顯示紅色警示）</span>
+      <input class="settings-input" type="number" id="setRsiHigh" min="60" max="90" step="1">
+    </div>
+    <div class="settings-row" style="border-bottom:none">
+      <span class="settings-lbl">RSI 超賣閾值（顯示綠色佈局提示）</span>
+      <input class="settings-input" type="number" id="setRsiLow" min="10" max="40" step="1">
+    </div>
+    <div style="margin-top:10px;font-size:10px;color:var(--txt3);line-height:1.7;padding:8px 10px;background:var(--bg3);border-radius:8px">
+      超買閾值範圍：60–90（預設 70）<br>
+      超賣閾值範圍：10–40（預設 30）<br>
+      設定存在瀏覽器 localStorage，重整後依然生效
+    </div>
+    <button onclick="saveSettings()" class="btn btn-primary" style="width:100%;margin-top:16px;justify-content:center">儲存設定</button>
+  </div>
+</div>
+
 <!-- Search overlay -->
 <div class="search-overlay" id="searchOverlay" onclick="closeSearch(event)">
   <div class="search-modal" id="searchModal">
@@ -669,6 +743,8 @@ let chart     = null;
 let curSym    = '0050';
 let state     = null;
 let cbBasePct = parseInt(localStorage.getItem('cbBasePct') || '80');
+let usdTwd    = null;
+let settings  = loadSettings();
 
 /* ─── Clock ───────────────────────────────────────────────────────────────── */
 function tickClock() {
@@ -749,14 +825,25 @@ function render() {
   document.getElementById('updatedAt').textContent = state.updated_at || '-';
   document.getElementById('cacheAge').textContent  = state.price_age != null ? state.price_age : '初始化中';
 
+  usdTwd = state.usdtwd || null;
+  renderUsdTwd(state.usdtwd);
   renderStockGrid(state.stocks);
   renderSOP(state.sop);
   renderAlerts(state.alerts, state.alert_history);
   renderSmile(state.sop);
   renderChart(curSym);
-  renderMarketSentiment(state.vix, state.foreign_net);
+  renderMarketSentiment(state.vix, state.foreign_net, state.fear_greed);
   renderCashBot(cbBasePct);
   renderChips(state.tw_chips);
+}
+
+/* ── USD/TWD ── */
+function renderUsdTwd(data) {
+  if (!data) return;
+  document.getElementById('usdtwdPill').style.display = 'flex';
+  document.getElementById('usdtwdRate').textContent = f(data.rate, 2);
+  const el = document.getElementById('usdtwdChg');
+  el.textContent = fc(data.change); el.className = cls(data.change);
 }
 
 /* ── Stock grid ── */
@@ -770,16 +857,16 @@ const ORDER = ['0050','QQQ','00631L','QLD','00662','00865B','GOOG','NVDA','TSLA'
 
 function rsiColor(v) {
   if (v == null) return 'var(--txt2)';
-  if (v > 70)   return 'var(--red)';
-  if (v < 30)   return 'var(--green)';
+  if (v > settings.rsiHigh) return 'var(--red)';
+  if (v < settings.rsiLow)  return 'var(--green)';
   return 'var(--txt2)';
 }
 function rsiLabel(v) {
   if (v == null) return '';
-  if (v > 80)   return '<span class="ind-badge ind-overbought">強烈超買</span>';
-  if (v > 70)   return '<span class="ind-badge ind-overbought">超買</span>';
-  if (v < 20)   return '<span class="ind-badge ind-oversold">強烈超賣</span>';
-  if (v < 30)   return '<span class="ind-badge ind-oversold">超賣</span>';
+  if (v > settings.rsiHigh + 10) return '<span class="ind-badge ind-overbought">強烈超買</span>';
+  if (v > settings.rsiHigh)      return '<span class="ind-badge ind-overbought">超買</span>';
+  if (v < settings.rsiLow  - 10) return '<span class="ind-badge ind-oversold">強烈超賣</span>';
+  if (v < settings.rsiLow)       return '<span class="ind-badge ind-oversold">超賣</span>';
   return '';
 }
 function macdBadge(cross, trend) {
@@ -815,6 +902,10 @@ function _buildCard(sym, s) {
   if (!s) return `<div class="scard flat" id="card-${sym}"><div class="sk"><div class="spin"></div></div></div>`;
   const dc      = s.daily_change;
   const cardCls = dc > 0 ? 'up' : dc < 0 ? 'down' : 'flat';
+  const isTwStock = ['0050','00631L','00662','00865B'].includes(sym);
+  const twdLine = (!isTwStock && usdTwd && s.price)
+    ? `<div style="font-size:10px;color:var(--txt3);margin-top:1px">≈ NT$${Math.round(s.price * usdTwd.rate).toLocaleString()}</div>`
+    : '';
   const tagCls  = s.above_ma200 ? 'tag-above' : 'tag-below';
   const tagTxt  = s.above_ma200 ? '年線上' : '年線下';
   return `
@@ -834,6 +925,7 @@ function _buildCard(sym, s) {
       </div>
     </div>
     <div class="scard-price">${f(s.price)}</div>
+    ${twdLine}
     <div class="scard-chg ${cls(dc)}">${fc(dc)} 今日</div>
     <hr class="scard-divider">
     <div class="scard-metrics">
@@ -985,24 +1077,61 @@ function renderSmile(sop) {
 }
 
 /* ── Market Sentiment ── */
-function renderMarketSentiment(vix, fn) {
+function fgLabel(s) {
+  if (s <= 25) return '極度恐慌';
+  if (s <= 45) return '恐慌';
+  if (s <= 55) return '中性';
+  if (s <= 75) return '貪婪';
+  return '極度貪婪';
+}
+function fgColor(s) {
+  if (s <= 25) return 'var(--green)';
+  if (s <= 45) return '#86efac';
+  if (s <= 55) return 'var(--yellow)';
+  if (s <= 75) return '#fb923c';
+  return 'var(--red)';
+}
+
+function renderMarketSentiment(vix, fn, fg) {
   const panel = document.getElementById('sentimentPanel');
   const badge = document.getElementById('vixBadge');
   if (!panel) return;
 
   let html = '';
+  const hasAny = !!(fg || vix || fn);
+
+  /* Fear & Greed section */
+  if (fg) {
+    const score = fg.score;
+    const needlePct = Math.min(Math.max(score, 0), 100).toFixed(1);
+    const prevTxt = fg.prev_week != null
+      ? `&ensp;<span style="font-size:10px;color:var(--txt3)">上週 ${fg.prev_week.toFixed(0)}</span>` : '';
+    html += `
+    <div style="margin-bottom:16px">
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;font-weight:600;letter-spacing:.3px">美股恐貪指數 (CNN)</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;color:${fgColor(score)}">${score.toFixed(0)}</span>
+        <span style="font-size:10px;font-weight:600;color:${fgColor(score)}">${fgLabel(score)}${prevTxt}</span>
+      </div>
+      <div class="fg-gradient-bar">
+        <div class="fg-needle" style="left:${needlePct}%"></div>
+      </div>
+      <div class="fg-scale">
+        <span>極恐</span><span>恐慌</span><span>中性</span><span>貪婪</span><span>極貪</span>
+      </div>
+    </div>
+    <hr class="scard-divider">`;
+  }
 
   /* VIX section */
   if (vix) {
     const vp = vix.price;
-    const vixBarColor = vp > 30 ? 'var(--red)' : vp > 20 ? 'var(--yellow)' : 'var(--green)';
+    const vixBarColor  = vp > 30 ? 'var(--red)' : vp > 20 ? 'var(--yellow)' : 'var(--green)';
     const vixTextColor = vp > 30 ? 'var(--red)' : vp > 20 ? 'var(--yellow)' : 'var(--txt2)';
     const vixLevel = vp > 40 ? '極度恐慌' : vp > 30 ? '高度恐慌' : vp > 20 ? '市場偏緊' : vp < 13 ? '過度樂觀' : '正常';
     const barW = Math.min(vp / 50 * 100, 100).toFixed(1);
-
     badge.textContent = `VIX ${vp}`;
     badge.style.color = vixTextColor;
-
     html += `
     <div style="margin-bottom:16px">
       <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;font-weight:600;letter-spacing:.3px">VIX 恐慌指數</div>
@@ -1034,7 +1163,6 @@ function renderMarketSentiment(vix, fn) {
     const total   = (foreign != null && trust != null && dealer != null)
                     ? foreign + trust + dealer : null;
     const dateStr = fn.date ? `<span style="font-size:9px;color:var(--txt3);margin-left:6px">${fn.date}</span>` : '';
-
     html += `
     <div>
       <div style="font-size:10px;color:var(--txt3);margin-bottom:10px;font-weight:600;letter-spacing:.3px">
@@ -1060,10 +1188,10 @@ function renderMarketSentiment(vix, fn) {
         </div>` : ''}
       </div>
     </div>`;
-  } else if (!vix) {
-    html = '<div class="empty-box">資料載入中…</div>';
-  } else {
+  } else if (hasAny) {
     html += '<div style="font-size:10px;color:var(--txt3);margin-top:8px">外資資料尚未載入或市場休市</div>';
+  } else {
+    html = '<div class="empty-box">資料載入中…</div>';
   }
 
   panel.innerHTML = html;
@@ -1480,12 +1608,47 @@ function onCbSlider(val) {
   renderCashBot(cbBasePct);
 }
 
+/* ─── Settings ────────────────────────────────────────────────────────────── */
+function loadSettings() {
+  return {
+    rsiHigh: parseInt(localStorage.getItem('rsiHigh') || '70'),
+    rsiLow:  parseInt(localStorage.getItem('rsiLow')  || '30'),
+  };
+}
+function openSettings() {
+  document.getElementById('setRsiHigh').value = settings.rsiHigh;
+  document.getElementById('setRsiLow').value  = settings.rsiLow;
+  document.getElementById('settingsOverlay').classList.add('open');
+}
+function closeSettingsModal() {
+  document.getElementById('settingsOverlay').classList.remove('open');
+}
+function closeSettings(e) {
+  if (e.target === document.getElementById('settingsOverlay')) closeSettingsModal();
+}
+function saveSettings() {
+  const high = parseInt(document.getElementById('setRsiHigh').value);
+  const low  = parseInt(document.getElementById('setRsiLow').value);
+  if (high > low && high >= 60 && high <= 90 && low >= 10 && low <= 40) {
+    localStorage.setItem('rsiHigh', String(high));
+    localStorage.setItem('rsiLow',  String(low));
+    settings = { rsiHigh: high, rsiLow: low };
+    closeSettingsModal();
+    render();
+    toast('設定已儲存');
+  } else {
+    toast('數值無效：超買需 60–90，超賣需 10–40，且超買 > 超賣', false);
+  }
+}
+
 /* ─── Init ────────────────────────────────────────────────────────────────── */
 document.getElementById('cbSlider').value    = cbBasePct;
 document.getElementById('cbBaseLabel').textContent = cbBasePct + '%';
 loadData();
 setInterval(loadData, 5 * 60 * 1000);
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSearchModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeSearchModal(); closeSettingsModal(); }
+});
 </script>
 </body>
 </html>
