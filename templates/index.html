@@ -741,6 +741,7 @@ button { cursor: pointer; font-family: inherit; }
           <button class="ctab"        onclick="switchChart(this,'GOOG')">GOOG</button>
           <button class="ctab"        onclick="switchChart(this,'NVDA')">NVDA</button>
           <button class="ctab"        onclick="switchChart(this,'TSLA')">TSLA</button>
+          <button class="ctab"        onclick="switchChart(this,'MSTR')">MSTR</button>
         </div>
       </div>
       <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
@@ -956,7 +957,7 @@ button { cursor: pointer; font-family: inherit; }
       <span class="settings-lbl">股票代號</span>
       <select class="pf-select" id="pfSym">
         <option>0050</option><option>00631L</option><option>00662</option><option>00865B</option>
-        <option>QQQ</option><option>QLD</option><option>GOOG</option><option>NVDA</option><option>TSLA</option>
+        <option>QQQ</option><option>QLD</option><option>GOOG</option><option>NVDA</option><option>TSLA</option><option>MSTR</option>
       </select>
     </div>
     <div class="settings-row">
@@ -1142,8 +1143,9 @@ const NAMES = {
   '00631L':'台灣50正2', 'QLD':'Ultra QQQ (2x)',
   '00662':'富邦NASDAQ', '00865B':'國泰US短債',
   'GOOG':'Alphabet (Google)', 'NVDA':'NVIDIA', 'TSLA':'Tesla',
+  'MSTR':'MicroStrategy',
 };
-const ORDER = ['0050','QQQ','00631L','QLD','00662','00865B','GOOG','NVDA','TSLA'];
+const ORDER = ['0050','QQQ','00631L','QLD','00662','00865B','GOOG','NVDA','TSLA','MSTR'];
 
 function rsiColor(v) {
   if (v == null) return 'var(--txt2)';
@@ -1186,7 +1188,7 @@ function divBanner(div) {
 }
 
 const TW_ORDER = ['0050','QQQ','00631L','QLD','00662','00865B'];
-const US_ORDER = ['GOOG','NVDA','TSLA'];
+const US_ORDER = ['GOOG','NVDA','TSLA','MSTR'];
 
 function _buildCard(sym, s) {
   if (!s) return `<div class="scard flat" id="card-${sym}"><div class="sk"><div class="spin"></div></div></div>`;
@@ -1261,13 +1263,16 @@ function _buildCard(sym, s) {
 
 function renderStockGrid(stocks) {
   if (!stocks) return;
-  const sep = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:10px;margin:4px 0 2px">
-    <span style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txt3)">美股</span>
-    <div style="flex:1;height:1px;background:var(--border)"></div>
-  </div>`;
   const twCards = TW_ORDER.map(sym => _buildCard(sym, stocks[sym])).join('');
   const usCards = US_ORDER.map(sym => _buildCard(sym, stocks[sym])).join('');
-  document.getElementById('stockGrid').innerHTML = twCards + sep + usCards;
+  const usSection = `<div style="grid-column:1/-1">
+    <div style="display:flex;align-items:center;gap:10px;margin:4px 0 10px">
+      <span style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txt3)">美股</span>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">${usCards}</div>
+  </div>`;
+  document.getElementById('stockGrid').innerHTML = twCards + usSection;
 }
 
 

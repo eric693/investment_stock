@@ -45,6 +45,7 @@ YF_US_SYMBOLS = {
     "GOOG": "GOOG",
     "NVDA": "NVDA",
     "TSLA": "TSLA",
+    "MSTR": "MSTR",
 }
 SYMBOL_NAMES = {
     "0050":   "元大台灣50",
@@ -56,6 +57,7 @@ SYMBOL_NAMES = {
     "GOOG":   "Alphabet (Google)",
     "NVDA":   "NVIDIA",
     "TSLA":   "Tesla",
+    "MSTR":   "MicroStrategy",
 }
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
