@@ -1,8 +1,11 @@
 import os
+import re
+import json
 import time
 import logging
 import threading
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, date
 from flask import Flask, render_template, jsonify, request
 import pandas as pd
 import numpy as np
@@ -69,6 +72,8 @@ _cache = {
     "fear_greed_ts":    0.0,
     "global_quotes":    {},
     "global_quotes_ts": 0.0,
+    "sector":           [],
+    "sector_ts":        0.0,
     "refreshing":  False,
     "vix":         None,
     "foreign_net": None,
@@ -79,6 +84,7 @@ CHIPS_TTL  = 7200   # 2 hours — TWSE chips published once daily ~14:30
 USDTWD_TTL = 1800   # 30 min
 FG_TTL     = 3600   # 1 hour — CNN Fear & Greed updates a few times daily
 GLOBAL_TTL = 1800   # 30 min
+SECTOR_TTL = 1800   # 30 min
 GLOBAL_SYMBOLS = {
     "^TWII": "台灣加權",
     "^N225": "日經225",
@@ -86,14 +92,57 @@ GLOBAL_SYMBOLS = {
     "^IXIC": "那斯達克",
     "SOXX":  "費半ETF",
 }
+SECTOR_SYMBOLS = {
+    "0050.TW": {"name": "台灣大盤",   "group": "TW"},
+    "0052.TW": {"name": "電子(0052)", "group": "TW"},
+    "0055.TW": {"name": "金融(0055)", "group": "TW"},
+    "0056.TW": {"name": "高股息(0056)","group": "TW"},
+    "^GSPC":   {"name": "S&P 500",   "group": "US"},
+    "SOXX":    {"name": "費半(SOXX)", "group": "US"},
+    "XLK":     {"name": "科技(XLK)", "group": "US"},
+    "XLF":     {"name": "金融(XLF)", "group": "US"},
+    "XLE":     {"name": "能源(XLE)", "group": "US"},
+}
 _refresh_lock = threading.Lock()
-alert_history: list = []
 _line_users: dict = {}
+
+ALERT_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "alert_history.json")
+
+def _load_alert_history() -> list:
+    try:
+        with open(ALERT_HISTORY_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def _save_alert_history():
+    try:
+        with open(ALERT_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(alert_history, f, ensure_ascii=False)
+    except Exception as exc:
+        logger.error("Alert history save error: %s", exc)
+
+alert_history: list = _load_alert_history()
 
 # Search cache: {ticker: {"entry": dict, "hist": DataFrame, "hist_ts": float, "price_ts": float}}
 _search_cache: dict = {}
 SEARCH_HIST_TTL  = 43200   # 12 hours — history data rarely changes intraday
 SEARCH_PRICE_TTL = 300     # 5 minutes — keep quote reasonably fresh
+
+def _start_search_cache_cleanup():
+    def _run():
+        while True:
+            time.sleep(300)
+            now = time.time()
+            expired = [k for k, v in list(_search_cache.items())
+                       if now - v.get("hist_ts", 0) > SEARCH_HIST_TTL]
+            for k in expired:
+                _search_cache.pop(k, None)
+            if expired:
+                logger.info("Search cache cleanup: evicted %d stale entries", len(expired))
+    threading.Thread(target=_run, daemon=True).start()
+
+_start_search_cache_cleanup()
 
 
 # ─── Technical Indicators ─────────────────────────────────────────────────────
@@ -133,28 +182,30 @@ def _calc_kd(df: pd.DataFrame, period: int = 9):
 # ─── Divergence Detection ─────────────────────────────────────────────────────
 def _find_peaks(series: pd.Series, order: int = 7) -> list[int]:
     """Local maxima indices (0-based) with at least `order` bars on each side."""
-    peaks = []
-    n = len(series)
-    for i in range(order, n - order):
-        window = series.iloc[i - order: i + order + 1]
-        if (series.iloc[i] == window.max()
-                and series.iloc[i] > series.iloc[i - 1]
-                and series.iloc[i] > series.iloc[i + 1]):
-            peaks.append(i)
-    return peaks
+    arr = series.to_numpy()
+    n   = len(arr)
+    if n < order * 2 + 1:
+        return []
+    idx     = np.arange(order, n - order)
+    windows = np.lib.stride_tricks.as_strided(
+        arr, shape=(len(idx), 2 * order + 1), strides=(arr.strides[0], arr.strides[0])
+    )
+    mask = (arr[idx] == windows.max(axis=1)) & (arr[idx] > arr[idx - 1]) & (arr[idx] > arr[idx + 1])
+    return idx[mask].tolist()
 
 
 def _find_troughs(series: pd.Series, order: int = 7) -> list[int]:
     """Local minima indices (0-based)."""
-    troughs = []
-    n = len(series)
-    for i in range(order, n - order):
-        window = series.iloc[i - order: i + order + 1]
-        if (series.iloc[i] == window.min()
-                and series.iloc[i] < series.iloc[i - 1]
-                and series.iloc[i] < series.iloc[i + 1]):
-            troughs.append(i)
-    return troughs
+    arr = series.to_numpy()
+    n   = len(arr)
+    if n < order * 2 + 1:
+        return []
+    idx     = np.arange(order, n - order)
+    windows = np.lib.stride_tricks.as_strided(
+        arr, shape=(len(idx), 2 * order + 1), strides=(arr.strides[0], arr.strides[0])
+    )
+    mask = (arr[idx] == windows.min(axis=1)) & (arr[idx] < arr[idx - 1]) & (arr[idx] < arr[idx + 1])
+    return idx[mask].tolist()
 
 
 def _calc_divergence(close: pd.Series, rsi: pd.Series,
@@ -564,14 +615,186 @@ def _fetch_fear_greed() -> dict | None:
         return None
 
 
+# ─── 配息資料 ─────────────────────────────────────────────────────────────────
+def _fetch_yahoo_dividends(ticker: str) -> list[dict]:
+    try:
+        data = _yahoo_get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+            {"interval": "1d", "range": "10y", "events": "dividends"},
+        )
+        result = (data or {}).get("chart", {}).get("result", [])
+        if not result:
+            return []
+        raw = result[0].get("events", {}).get("dividends", {})
+        divs = [
+            {"date": pd.Timestamp(int(ts), unit="s").strftime("%Y-%m-%d"),
+             "amount": float(v.get("amount", 0))}
+            for ts, v in raw.items() if v.get("amount", 0) > 0
+        ]
+        divs.sort(key=lambda x: x["date"])
+        logger.info("Dividends %s: %d events", ticker, len(divs))
+        return divs
+    except Exception as exc:
+        logger.error("Dividend fetch error %s: %s", ticker, exc)
+        return []
+
+
+def _run_dividend_sim(hist: pd.DataFrame, dividends: list[dict],
+                      capital: float, start_str: str) -> dict:
+    hist_c = hist.dropna(subset=["Close"])
+    if re.match(r"^\d{4}-\d{2}$", start_str):
+        start_dt = pd.Timestamp(f"{start_str}-01")
+    else:
+        td = date.today()
+        start_dt = pd.Timestamp(td.year - 5, 1, 1)
+
+    hist_f = hist_c[hist_c.index >= start_dt]
+    if hist_f.empty:
+        return {"error": "指定期間內無資料，請調整起始月份"}
+
+    start_price  = float(hist_f["Close"].iloc[0])
+    drip_shares  = capital / start_price
+    nodiv_shares = capital / start_price
+    nodiv_cash   = 0.0
+    drip_total_div = nodiv_total_div = 0.0
+    div_events: list = []
+
+    drip_chart: list  = []
+    nodiv_chart: list = []
+
+    price_map = {idx.strftime("%Y-%m-%d"): float(row["Close"])
+                 for idx, row in hist_f.iterrows()}
+
+    for d_str, price in sorted(price_map.items()):
+        for div in dividends:
+            if div["date"] != d_str or div["amount"] <= 0:
+                continue
+            amt = div["amount"]
+            drip_div   = drip_shares  * amt
+            nodiv_div  = nodiv_shares * amt
+            drip_shares += drip_div / price
+            drip_total_div  += drip_div
+            nodiv_cash      += nodiv_div
+            nodiv_total_div += nodiv_div
+            div_events.append({
+                "date":             d_str,
+                "amount_per_share": round(amt, 4),
+                "drip_total":       round(drip_div, 2),
+                "shares_bought":    round(drip_div / price, 4),
+                "price":            round(price, 2),
+            })
+        drip_chart.append( {"d": d_str, "v": round(drip_shares  * price)})
+        nodiv_chart.append({"d": d_str, "v": round(nodiv_shares * price + nodiv_cash)})
+
+    final_price = float(hist_f["Close"].iloc[-1])
+    days = max((hist_f.index[-1] - hist_f.index[0]).days, 1)
+    drip_final  = drip_shares  * final_price
+    nodiv_final = nodiv_shares * final_price + nodiv_cash
+    drip_ret    = (drip_final  - capital) / capital * 100
+    nodiv_ret   = (nodiv_final - capital) / capital * 100
+
+    return {
+        "capital":       capital,
+        "start_date":    hist_f.index[0].strftime("%Y-%m-%d"),
+        "end_date":      hist_f.index[-1].strftime("%Y-%m-%d"),
+        "days":          days,
+        "start_price":   round(start_price, 2),
+        "final_price":   round(final_price, 2),
+        "drip_final":    round(drip_final),
+        "drip_shares":   round(drip_shares, 4),
+        "drip_reinvested": round(drip_total_div),
+        "drip_return":   round(drip_ret,  2),
+        "drip_cagr":     round(((drip_final  / capital) ** (365.0 / days) - 1) * 100, 2),
+        "nodiv_final":   round(nodiv_final),
+        "nodiv_cash":    round(nodiv_cash),
+        "nodiv_return":  round(nodiv_ret,  2),
+        "nodiv_cagr":    round(((nodiv_final / capital) ** (365.0 / days) - 1) * 100, 2),
+        "advantage":     round(drip_final - nodiv_final),
+        "advantage_pct": round(drip_ret - nodiv_ret, 2),
+        "div_count":     len(div_events),
+        "div_events":    div_events[-12:],
+        "drip_chart":    drip_chart,
+        "nodiv_chart":   nodiv_chart,
+    }
+
+
+# ─── 產業輪動 ──────────────────────────────────────────────────────────────────
+def _fetch_sector_perf(ticker: str, name: str, group: str) -> dict | None:
+    try:
+        data = _yahoo_get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+            {"interval": "1d", "range": "1y"},
+        )
+        result = (data or {}).get("chart", {}).get("result", [])
+        if not result:
+            return None
+        r          = result[0]
+        timestamps = r.get("timestamp", [])
+        closes     = r.get("indicators", {}).get("quote", [{}])[0].get("close", [])
+        valid      = [(pd.Timestamp(ts, unit="s").normalize(), float(c))
+                      for ts, c in zip(timestamps, closes) if c is not None]
+        if len(valid) < 10:
+            return None
+
+        dates, prices = zip(*valid)
+        last = prices[-1]
+
+        def _pct_since(n_days: int) -> float | None:
+            cutoff = dates[-1] - pd.Timedelta(days=n_days)
+            base = next((p for dt, p in zip(dates, prices) if dt <= cutoff), None)
+            return round((last - base) / base * 100, 2) if base else None
+
+        year_start = pd.Timestamp(dates[-1].year, 1, 1)
+        ytd_prices = [p for dt, p in zip(dates, prices) if dt >= year_start]
+        ytd = round((last - ytd_prices[0]) / ytd_prices[0] * 100, 2) if ytd_prices else None
+
+        return {
+            "ticker":   ticker,
+            "name":     name,
+            "group":    group,
+            "price":    round(last, 2),
+            "chg_1w":   _pct_since(7),
+            "chg_1m":   _pct_since(30),
+            "chg_3m":   _pct_since(90),
+            "chg_ytd":  ytd,
+        }
+    except Exception as exc:
+        logger.error("Sector perf error %s: %s", ticker, exc)
+        return None
+
+
+def _fetch_all_sector_perf() -> list:
+    order = list(SECTOR_SYMBOLS.keys())
+    result = []
+    with ThreadPoolExecutor(max_workers=len(SECTOR_SYMBOLS)) as pool:
+        futs = {pool.submit(_fetch_sector_perf, t, m["name"], m["group"]): t
+                for t, m in SECTOR_SYMBOLS.items()}
+        for fut in as_completed(futs):
+            try:
+                v = fut.result()
+                if v:
+                    result.append(v)
+            except Exception as exc:
+                logger.warning("Sector perf error: %s", exc)
+    result.sort(key=lambda x: order.index(x["ticker"]) if x["ticker"] in order else 99)
+    logger.info("Sector rotation fetched: %d symbols", len(result))
+    return result
+
+
 # ─── 全球大盤即時報價 ─────────────────────────────────────────────────────────────
 def _fetch_global_quotes() -> dict:
     result = {}
-    for ticker, name in GLOBAL_SYMBOLS.items():
-        q = _fetch_yahoo_quote(ticker)
-        if q:
-            result[ticker] = {**q, "name": name}
-        time.sleep(0.4)
+    with ThreadPoolExecutor(max_workers=len(GLOBAL_SYMBOLS)) as pool:
+        futs = {pool.submit(_fetch_yahoo_quote, ticker): (ticker, name)
+                for ticker, name in GLOBAL_SYMBOLS.items()}
+        for fut in as_completed(futs):
+            ticker, name = futs[fut]
+            try:
+                q = fut.result()
+                if q:
+                    result[ticker] = {**q, "name": name}
+            except Exception as exc:
+                logger.warning("Global quote error %s: %s", ticker, exc)
     logger.info("Global quotes: %s", list(result.keys()))
     return result
 
@@ -840,120 +1063,123 @@ def _build_stock_entry(name: str, hist: pd.DataFrame, quote: dict) -> dict:
 # ─── Refresh logic ────────────────────────────────────────────────────────────
 def _do_refresh(refresh_hist: bool, refresh_price: bool):
     if refresh_hist:
-        logger.info("Refreshing TW histories (Yahoo Finance first)…")
-        for name, av_sym in TW_SYMBOLS.items():
-            hist = _fetch_yahoo_history(av_sym)
-            if hist is None:
-                logger.warning("Yahoo history failed for %s, trying TWSE…", name)
-                stock_no = av_sym.replace(".TW", "")
-                hist = _fetch_twse_history(stock_no)
-            if hist is not None:
-                _cache["histories"][name] = hist
+        logger.info("Refreshing histories and market data (parallel)…")
 
+        def _tw_hist(name, av_sym):
+            h = _fetch_yahoo_history(av_sym)
+            if h is None:
+                logger.warning("Yahoo hist failed for %s, trying TWSE…", name)
+                h = _fetch_twse_history(av_sym.replace(".TW", ""))
+            return name, h
+
+        def _yf_hist(name, ticker):
+            return name, _fetch_yahoo_history(ticker)
+
+        # Phase 1: all non-TD fetches in parallel
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            tw_futs   = [pool.submit(_tw_hist, n, s)      for n, s   in TW_SYMBOLS.items()]
+            yf_futs   = [pool.submit(_yf_hist, n, t)      for n, t   in YF_US_SYMBOLS.items()]
+            misc_futs = {
+                pool.submit(_fetch_vix):           "vix",
+                pool.submit(_fetch_foreign_net):   "foreign_net",
+                pool.submit(_fetch_tw_chips):      "chips",
+                pool.submit(_fetch_usdtwd):        "usdtwd",
+                pool.submit(_fetch_fear_greed):    "fear_greed",
+                pool.submit(_fetch_global_quotes): "global_quotes",
+            }
+            for fut in as_completed(tw_futs + yf_futs):
+                name, hist = fut.result()
+                if hist is not None:
+                    _cache["histories"][name] = hist
+            for fut, key in misc_futs.items():
+                val = fut.result()
+                if val:
+                    if key == "chips":
+                        _cache["tw_chips"] = val; _cache["chips_ts"] = time.time()
+                    elif key == "global_quotes":
+                        _cache["global_quotes"] = val; _cache["global_quotes_ts"] = time.time()
+                    else:
+                        _cache[key] = val
+
+        # Phase 2: TD histories (rate-limited, must stay sequential)
         logger.info("Refreshing US histories (Twelve Data)…")
         for name, (sym, exch) in US_SYMBOLS.items():
             _td_throttle()
             hist = _fetch_td_history(sym, exch)
             if hist is None:
-                logger.warning("TD history failed for %s, trying Yahoo Finance…", name)
+                logger.warning("TD hist failed for %s, trying Yahoo…", name)
                 hist = _fetch_yahoo_history(sym)
             if hist is not None:
                 _cache["histories"][name] = hist
 
-        logger.info("Refreshing YF US histories…")
-        for name, ticker in YF_US_SYMBOLS.items():
-            hist = _fetch_yahoo_history(ticker)
-            if hist is not None:
-                _cache["histories"][name] = hist
-
-        logger.info("Refreshing VIX and 外資買賣超…")
-        vix = _fetch_vix()
-        if vix:
-            _cache["vix"] = vix
-        fn = _fetch_foreign_net()
-        if fn:
-            _cache["foreign_net"] = fn
-        chips = _fetch_tw_chips()
-        if chips:
-            _cache["tw_chips"]  = chips
-            _cache["chips_ts"]  = time.time()
-
-        usdtwd = _fetch_usdtwd()
-        if usdtwd:
-            _cache["usdtwd"] = usdtwd
-        fg = _fetch_fear_greed()
-        if fg:
-            _cache["fear_greed"] = fg
-
-        logger.info("Refreshing global quotes…")
-        gq = _fetch_global_quotes()
-        if gq:
-            _cache["global_quotes"]    = gq
-            _cache["global_quotes_ts"] = time.time()
-
         _cache["hist_ts"] = time.time()
 
     if refresh_price:
-        logger.info("Refreshing TW prices (TWSE)…")
-        tw_quotes = _fetch_tw_quotes()
-        for name, av_sym in TW_SYMBOLS.items():
+        logger.info("Refreshing prices (parallel)…")
+        now_t = time.time()
+
+        def _tw_entry(name, av_sym, tw_quotes):
             quote = tw_quotes.get(name)
             if quote is None:
-                logger.warning("TWSE quote missing for %s, trying Yahoo Finance…", name)
+                logger.warning("TWSE quote missing for %s, trying Yahoo…", name)
                 quote = _fetch_yahoo_quote(av_sym)
             hist = _cache["histories"].get(name)
-            if quote and hist is not None:
-                _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
+            return name, (_build_stock_entry(name, hist, quote) if quote and hist is not None else None)
 
+        def _yf_entry(name, ticker):
+            quote = _fetch_yahoo_quote(ticker)
+            hist  = _cache["histories"].get(name)
+            return name, (_build_stock_entry(name, hist, quote) if quote and hist is not None else None)
+
+        do_vix    = now_t - _cache["vix_ts"]           > VIX_TTL
+        do_chips  = now_t - _cache["chips_ts"]         > CHIPS_TTL
+        do_usd    = now_t - _cache["usdtwd_ts"]        > USDTWD_TTL
+        do_fg     = now_t - _cache["fear_greed_ts"]    > FG_TTL
+        do_global = now_t - _cache["global_quotes_ts"] > GLOBAL_TTL
+
+        # Phase 1: bulk TWSE quote, then all non-TD entries + optional misc in parallel
+        tw_quotes = _fetch_tw_quotes()
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            entry_futs = (
+                [pool.submit(_tw_entry, n, s, tw_quotes) for n, s in TW_SYMBOLS.items()] +
+                [pool.submit(_yf_entry, n, t)            for n, t in YF_US_SYMBOLS.items()]
+            )
+            misc_futs = {}
+            if do_vix:    misc_futs[pool.submit(_fetch_vix)]           = "vix"
+            if do_chips:  misc_futs[pool.submit(_fetch_tw_chips)]      = "chips"
+            if do_usd:    misc_futs[pool.submit(_fetch_usdtwd)]        = "usdtwd"
+            if do_fg:     misc_futs[pool.submit(_fetch_fear_greed)]    = "fear_greed"
+            if do_global: misc_futs[pool.submit(_fetch_global_quotes)] = "global_quotes"
+
+            for fut in as_completed(entry_futs):
+                name, entry = fut.result()
+                if entry:
+                    _cache["stocks"][name] = entry
+            for fut, key in misc_futs.items():
+                val = fut.result()
+                if val:
+                    if key == "chips":
+                        _cache["tw_chips"] = val; _cache["chips_ts"] = now_t
+                    elif key == "global_quotes":
+                        _cache["global_quotes"] = val; _cache["global_quotes_ts"] = now_t
+                    elif key == "vix":
+                        _cache["vix"] = val; _cache["vix_ts"] = now_t
+                    elif key == "usdtwd":
+                        _cache["usdtwd"] = val; _cache["usdtwd_ts"] = now_t
+                    elif key == "fear_greed":
+                        _cache["fear_greed"] = val; _cache["fear_greed_ts"] = now_t
+
+        # Phase 2: TD quotes (rate-limited, must stay sequential)
         logger.info("Refreshing US prices (Twelve Data)…")
         for name, (sym, exch) in US_SYMBOLS.items():
             _td_throttle()
             quote = _fetch_td_quote(sym, exch)
             if quote is None:
-                logger.warning("TD quote failed for %s, trying Yahoo Finance…", name)
+                logger.warning("TD quote failed for %s, trying Yahoo…", name)
                 quote = _fetch_yahoo_quote(sym)
-            hist  = _cache["histories"].get(name)
+            hist = _cache["histories"].get(name)
             if quote and hist is not None:
                 _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
-
-        logger.info("Refreshing YF US prices…")
-        for name, ticker in YF_US_SYMBOLS.items():
-            quote = _fetch_yahoo_quote(ticker)
-            hist  = _cache["histories"].get(name)
-            if quote and hist is not None:
-                _cache["stocks"][name] = _build_stock_entry(name, hist, quote)
-
-        now_t = time.time()
-        # VIX: refresh at most every 30 min
-        if now_t - _cache["vix_ts"] > VIX_TTL:
-            vix = _fetch_vix()
-            if vix:
-                _cache["vix"]    = vix
-                _cache["vix_ts"] = now_t
-        # Chips: refresh at most every 2 hours (published daily ~14:30)
-        if now_t - _cache["chips_ts"] > CHIPS_TTL:
-            chips = _fetch_tw_chips()
-            if chips:
-                _cache["tw_chips"]  = chips
-                _cache["chips_ts"]  = now_t
-
-        if now_t - _cache["usdtwd_ts"] > USDTWD_TTL:
-            usdtwd = _fetch_usdtwd()
-            if usdtwd:
-                _cache["usdtwd"]    = usdtwd
-                _cache["usdtwd_ts"] = now_t
-
-        if now_t - _cache["fear_greed_ts"] > FG_TTL:
-            fg = _fetch_fear_greed()
-            if fg:
-                _cache["fear_greed"]    = fg
-                _cache["fear_greed_ts"] = now_t
-
-        if now_t - _cache["global_quotes_ts"] > GLOBAL_TTL:
-            gq = _fetch_global_quotes()
-            if gq:
-                _cache["global_quotes"]    = gq
-                _cache["global_quotes_ts"] = now_t
 
         _cache["price_ts"] = now_t
 
@@ -1196,9 +1422,7 @@ def check_alerts(stocks: dict, sop: dict | None) -> list[dict]:
 
 
 # ─── Notification ─────────────────────────────────────────────────────────────
-def send_notification(message: str):
-    if not LINE_TOKEN or not LINE_USER_IDS:
-        return
+def _send_notification_sync(message: str):
     for uid in LINE_USER_IDS:
         try:
             r = requests.post(
@@ -1214,6 +1438,11 @@ def send_notification(message: str):
         except Exception as e:
             logger.error("LINE error (uid=%s): %s", uid, e)
 
+def send_notification(message: str):
+    if not LINE_TOKEN or not LINE_USER_IDS:
+        return
+    threading.Thread(target=_send_notification_sync, args=(message,), daemon=True).start()
+
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 @app.route("/")
@@ -1228,6 +1457,7 @@ def api_dashboard():
         sop    = compute_sop(stocks)
         alerts = check_alerts(stocks, sop)
 
+        new_alerts = False
         for a in alerts:
             # Deduplicate by code+title (ignore ts which changes every call)
             is_dup = any(
@@ -1236,8 +1466,11 @@ def api_dashboard():
             )
             if not is_dup:
                 alert_history.insert(0, a)
+                new_alerts = True
         while len(alert_history) > 50:
             alert_history.pop()
+        if new_alerts:
+            _save_alert_history()
 
         return jsonify({
             "stocks":        stocks,
@@ -1333,7 +1566,6 @@ def api_line_users():
 
 @app.route("/api/search")
 def api_search():
-    import re
     q = request.args.get("q", "").strip().upper()
     if not q or len(q) > 12:
         return jsonify({"error": "請輸入有效的股票代號"}), 400
@@ -1384,6 +1616,48 @@ def api_search():
     return jsonify(entry)
 
 
+@app.route("/api/dividend-sim")
+def api_dividend_sim():
+    sym = request.args.get("sym", "0056").upper()
+    try:    capital = float(request.args.get("capital", "1000000"))
+    except: capital = 1_000_000
+    start_str = request.args.get("start", "")
+
+    ticker = f"{sym}.TW" if re.match(r"^\d", sym) else sym
+    now    = time.time()
+    cache_key = f"div_{ticker}"
+    cached = _search_cache.get(cache_key, {})
+
+    hist = cached.get("hist") if now - cached.get("hist_ts", 0) < SEARCH_HIST_TTL else None
+    if hist is None:
+        hist = _fetch_yahoo_history(ticker)
+        if hist is None:
+            return jsonify({"error": f"「{sym}」歷史資料取得失敗"}), 404
+        cached["hist"] = hist; cached["hist_ts"] = now
+
+    divs = cached.get("divs") if now - cached.get("div_ts", 0) < SEARCH_HIST_TTL else None
+    if divs is None:
+        divs = _fetch_yahoo_dividends(ticker)
+        cached["divs"] = divs; cached["div_ts"] = now
+
+    _search_cache[cache_key] = cached
+
+    if not divs:
+        return jsonify({"error": f"「{sym}」找不到配息記錄，請確認為高股息標的"}), 404
+    return jsonify(_run_dividend_sim(hist, divs, capital, start_str))
+
+
+@app.route("/api/sector-rotation")
+def api_sector_rotation():
+    now = time.time()
+    if not _cache.get("sector") or now - _cache.get("sector_ts", 0) > SECTOR_TTL:
+        data = _fetch_all_sector_perf()
+        if data:
+            _cache["sector"]    = data
+            _cache["sector_ts"] = now
+    return jsonify(_cache.get("sector", []))
+
+
 @app.route("/api/backtest")
 def api_backtest():
     sym = request.args.get("sym", "0050").upper()
@@ -1399,7 +1673,6 @@ def api_backtest():
 
 @app.route("/api/dca")
 def api_dca():
-    import re as _re
     sym = request.args.get("sym", "0050").upper()
     try:    monthly = float(request.args.get("monthly", "10000"))
     except: monthly = 10000.0
@@ -1414,7 +1687,7 @@ def api_dca():
         return jsonify({"error": "無有效歷史資料"}), 404
 
     today = datetime.now(TW_TZ).date()
-    if _re.match(r"^\d{4}-\d{2}$", start_str):
+    if re.match(r"^\d{4}-\d{2}$", start_str):
         sy, sm = int(start_str[:4]), int(start_str[5:7])
     else:
         sy = today.year - 2; sm = today.month
@@ -1445,8 +1718,7 @@ def api_dca():
     ret_pct       = profit / total_invested * 100 if total_invested else 0
     avg_cost      = total_invested / total_shares  if total_shares   else 0
 
-    from datetime import date as _date
-    span_d = max((_date(today.year, today.month, 1) - _date(sy, sm, 1)).days, 1)
+    span_d = max((date(today.year, today.month, 1) - date(sy, sm, 1)).days, 1)
     cagr   = ((current_value / total_invested) ** (365.0 / span_d) - 1) * 100 if total_invested else 0
 
     return jsonify({

@@ -546,6 +546,76 @@ button { cursor: pointer; font-family: inherit; }
 .bt-dot-s { width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;margin-top:3px; }
 .bt-dot-b { width:6px;height:6px;border-radius:50%;background:var(--red);  flex-shrink:0;margin-top:3px; }
 
+/* ─── Dividend Sim ────────────────────────────────────────────────────── */
+.div-compare {
+  display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;
+}
+@media (max-width:700px) { .div-compare { grid-template-columns:1fr; } }
+.div-col {
+  background:var(--bg3); border:1px solid var(--border); border-radius:10px; padding:14px;
+}
+.div-col-title {
+  font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+  margin-bottom:10px;
+}
+.div-col-title.drip  { color:var(--cyan); }
+.div-col-title.nodiv { color:var(--yellow); }
+.div-adv {
+  display:flex; align-items:center; gap:10px;
+  background:var(--green-dim); border:1px solid rgba(34,197,94,.25);
+  border-radius:8px; padding:9px 14px; margin-bottom:14px;
+  font-size:12px;
+}
+.div-chart-wrap { height:180px; margin-bottom:14px; }
+.div-ev-table {
+  width:100%; border-collapse:collapse; font-size:10px; color:var(--txt2);
+}
+.div-ev-table th {
+  font-size:9px; font-weight:600; letter-spacing:.3px; color:var(--txt3);
+  padding:3px 6px; text-align:right; border-bottom:1px solid var(--border);
+}
+.div-ev-table th:first-child { text-align:left; }
+.div-ev-table td {
+  padding:4px 6px; text-align:right; border-bottom:1px solid var(--border);
+  font-family:'JetBrains Mono',monospace;
+}
+.div-ev-table td:first-child { text-align:left; font-family:inherit; }
+.div-ev-table tr:last-child td { border-bottom:none; }
+
+/* ─── Sector Rotation ─────────────────────────────────────────────────── */
+.sector-sort-tabs {
+  display:flex; gap:6px;
+}
+.stab {
+  padding:3px 10px; border-radius:5px; border:1px solid var(--border);
+  background:none; color:var(--txt2); font-size:11px; cursor:pointer;
+}
+.stab.active { background:var(--bg3); color:var(--txt1); border-color:var(--border2); }
+.sector-table {
+  width:100%; border-collapse:collapse; font-size:11px;
+}
+.sector-table th {
+  font-size:9px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
+  color:var(--txt3); padding:5px 8px; text-align:right;
+  border-bottom:1px solid var(--border); cursor:pointer; user-select:none;
+}
+.sector-table th:first-child { text-align:left; }
+.sector-table th.sorted { color:var(--cyan); }
+.sector-table td {
+  padding:6px 8px; border-bottom:1px solid var(--border);
+  text-align:right; font-family:'JetBrains Mono',monospace; font-size:11px;
+}
+.sector-table td:first-child {
+  text-align:left; font-family:inherit; font-size:12px; font-weight:500;
+}
+.sector-table tr:last-child td { border-bottom:none; }
+.sector-bar-wrap {
+  display:inline-flex; align-items:center; gap:4px; min-width:80px; justify-content:flex-end;
+}
+.sector-bar {
+  height:4px; border-radius:2px; min-width:2px;
+}
+
 /* ─── Portfolio modal select ──────────────────────────────────────────── */
 .pf-select {
   background:var(--bg3); border:1px solid var(--border2); border-radius:6px;
@@ -790,6 +860,50 @@ button { cursor: pointer; font-family: inherit; }
     </div>
     <div class="panel-body" id="backtestPanel">
       <div class="empty-box">輸入參數後點「開始回測」查看歷史訊號模擬結果</div>
+    </div>
+  </div>
+
+  <!-- 存股配息模擬 Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">存股配息模擬</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">DRIP 再投入 vs 只領現金的長期差異</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="pf-select" id="divSym" style="width:90px">
+          <option value="0056">0056</option>
+          <option value="00878">00878</option>
+          <option value="00713">00713</option>
+          <option value="custom">自訂…</option>
+        </select>
+        <input class="dca-input" id="divSymCustom" placeholder="代號" style="width:70px;display:none;text-transform:uppercase">
+        <input class="dca-input" id="divCapital" type="number" value="1000000" style="width:120px;text-align:right" placeholder="初始資金">
+        <input class="dca-input dca-month" id="divStart" type="month">
+        <button class="btn btn-ghost" onclick="calcDivSim()">開始模擬</button>
+      </div>
+    </div>
+    <div class="panel-body" id="divSimPanel">
+      <div class="empty-box">選擇標的與起始年月後點「開始模擬」</div>
+    </div>
+  </div>
+
+  <!-- 產業輪動 Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">產業輪動</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">台股 / 美股各類 ETF 相對強弱</span>
+      </div>
+      <div class="sector-sort-tabs">
+        <button class="stab active" onclick="sortSector('chg_1w',  this)">1週</button>
+        <button class="stab"        onclick="sortSector('chg_1m',  this)">1月</button>
+        <button class="stab"        onclick="sortSector('chg_3m',  this)">3月</button>
+        <button class="stab"        onclick="sortSector('chg_ytd', this)">今年</button>
+      </div>
+    </div>
+    <div class="panel-body" id="sectorPanel">
+      <div class="sk"><div class="spin"></div></div>
     </div>
   </div>
 
@@ -1941,6 +2055,190 @@ async function runBacktest() {
   }
 }
 
+/* ─── Dividend Sim ─────────────────────────────────────────────────────────── */
+document.getElementById('divSym').addEventListener('change', function() {
+  document.getElementById('divSymCustom').style.display = this.value === 'custom' ? '' : 'none';
+});
+
+let _divChart = null;
+
+async function calcDivSim() {
+  const sel = document.getElementById('divSym').value;
+  const sym = sel === 'custom'
+    ? (document.getElementById('divSymCustom').value || '').trim().toUpperCase()
+    : sel;
+  if (!sym) { toast('請輸入股票代號', false); return; }
+  const capital = parseFloat(document.getElementById('divCapital').value) || 1000000;
+  const start   = document.getElementById('divStart').value;
+  const el = document.getElementById('divSimPanel');
+  el.innerHTML = '<div class="sk" style="padding:20px"><div class="spin"></div></div>';
+
+  try {
+    const qs = `sym=${encodeURIComponent(sym)}&capital=${capital}${start ? '&start=' + encodeURIComponent(start) : ''}`;
+    const r = await fetch(`/api/dividend-sim?${qs}`);
+    const d = await r.json();
+    if (d.error) { el.innerHTML = `<div class="empty-box" style="color:var(--red)">${d.error}</div>`; return; }
+
+    const advHtml = d.advantage > 0
+      ? `<div class="div-adv">
+           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--green)" stroke-width="2">
+             <path d="M8 3v10M3 8l5-5 5 5" stroke-linecap="round" stroke-linejoin="round"/>
+           </svg>
+           <span>再投入比直接領現金多賺 <strong style="color:var(--green)">NT$${d.advantage.toLocaleString()}</strong>（+${fc(d.advantage_pct)}），${d.days} 天複利差距</span>
+         </div>` : '';
+
+    const divRows = d.div_events.slice().reverse().map(ev => `
+      <tr>
+        <td>${ev.date}</td>
+        <td>${f(ev.amount_per_share, 4)}</td>
+        <td>${f(ev.price, 2)}</td>
+        <td style="color:var(--green)">+${f(ev.shares_bought, 4)} 股</td>
+        <td>NT$${ev.drip_total.toLocaleString()}</td>
+      </tr>`).join('');
+
+    el.innerHTML = `
+      ${advHtml}
+      <div class="div-compare">
+        <div class="div-col">
+          <div class="div-col-title drip">配息再投入 (DRIP)</div>
+          <div class="scard-metrics">
+            <div class="metric-row"><span class="metric-lbl">最終資產</span><span class="metric-val pos">NT$${d.drip_final.toLocaleString()}</span></div>
+            <div class="metric-row"><span class="metric-lbl">累積股數</span><span class="metric-val">${d.drip_shares.toLocaleString()}</span></div>
+            <div class="metric-row"><span class="metric-lbl">再投入配息</span><span class="metric-val" style="color:var(--cyan)">NT$${d.drip_reinvested.toLocaleString()}</span></div>
+            <div class="metric-row"><span class="metric-lbl">總報酬率</span><span class="metric-val ${cls(d.drip_return)}">${fc(d.drip_return)}</span></div>
+            <div class="metric-row"><span class="metric-lbl">年化報酬率</span><span class="metric-val ${cls(d.drip_cagr)}">${fc(d.drip_cagr)}</span></div>
+          </div>
+        </div>
+        <div class="div-col">
+          <div class="div-col-title nodiv">只領現金（不再投入）</div>
+          <div class="scard-metrics">
+            <div class="metric-row"><span class="metric-lbl">最終資產（含現金）</span><span class="metric-val pos">NT$${d.nodiv_final.toLocaleString()}</span></div>
+            <div class="metric-row"><span class="metric-lbl">持股市值</span><span class="metric-val">NT$${Math.round(d.nodiv_final - d.nodiv_cash).toLocaleString()}</span></div>
+            <div class="metric-row"><span class="metric-lbl">累積現金配息</span><span class="metric-val" style="color:var(--yellow)">NT$${d.nodiv_cash.toLocaleString()}</span></div>
+            <div class="metric-row"><span class="metric-lbl">總報酬率</span><span class="metric-val ${cls(d.nodiv_return)}">${fc(d.nodiv_return)}</span></div>
+            <div class="metric-row"><span class="metric-lbl">年化報酬率</span><span class="metric-val ${cls(d.nodiv_cagr)}">${fc(d.nodiv_cagr)}</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="div-chart-wrap"><canvas id="divChart"></canvas></div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">
+        期間：${d.start_date} ～ ${d.end_date}　初始 NT$${(d.capital/10000).toFixed(0)}萬　共 ${d.div_count} 次配息
+      </div>
+      ${divRows ? `
+      <div style="font-size:10px;font-weight:700;letter-spacing:.3px;color:var(--txt3);margin-bottom:6px">最近配息紀錄（再投入）</div>
+      <div style="overflow-x:auto">
+        <table class="div-ev-table">
+          <thead><tr><th>除息日</th><th>每股配息</th><th>股價</th><th>新增股數</th><th>小計</th></tr></thead>
+          <tbody>${divRows}</tbody>
+        </table>
+      </div>` : ''}`;
+
+    // Draw comparison chart
+    if (_divChart) { _divChart.destroy(); _divChart = null; }
+    const ctx = document.getElementById('divChart').getContext('2d');
+    const step = Math.max(1, Math.floor(d.drip_chart.length / 252));
+    const labels   = d.drip_chart.filter((_,i)=>i%step===0).map(p=>p.d);
+    const dripVals = d.drip_chart.filter((_,i)=>i%step===0).map(p=>p.v);
+    const nodivVals= d.nodiv_chart.filter((_,i)=>i%step===0).map(p=>p.v);
+    _divChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label:'DRIP 再投入', data: dripVals,  borderColor:'#06b6d4', borderWidth:2,
+            pointRadius:0, fill:false, tension:.3 },
+          { label:'只領現金',    data: nodivVals, borderColor:'#eab308', borderWidth:2,
+            borderDash:[5,3], pointRadius:0, fill:false, tension:.3 },
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false, animation:false,
+        plugins: { legend:{ labels:{ color:'#8896a9', font:{size:11} } }, tooltip:{ mode:'index' } },
+        scales: {
+          x:{ ticks:{ color:'#55657a', maxTicksLimit:8, font:{size:10} }, grid:{ color:'#1c2230' } },
+          y:{ ticks:{ color:'#55657a', font:{size:10},
+                callback: v => 'NT$'+(v>=10000?(v/10000).toFixed(0)+'萬':v.toLocaleString()) },
+              grid:{ color:'#1c2230' } }
+        }
+      }
+    });
+  } catch(e) {
+    el.innerHTML = '<div class="empty-box" style="color:var(--red)">請求失敗，請重試</div>';
+  }
+}
+
+/* ─── Sector Rotation ──────────────────────────────────────────────────────── */
+let _sectorData = [];
+let _sectorSortKey = 'chg_1w';
+
+async function loadSectorRotation() {
+  const el = document.getElementById('sectorPanel');
+  try {
+    const r = await fetch('/api/sector-rotation');
+    _sectorData = await r.json();
+    renderSectorTable();
+  } catch(e) {
+    el.innerHTML = '<div class="empty-box" style="color:var(--red)">載入失敗，請重新整理</div>';
+  }
+}
+
+function sortSector(key, btn) {
+  _sectorSortKey = key;
+  document.querySelectorAll('.stab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderSectorTable();
+}
+
+function renderSectorTable() {
+  const el = document.getElementById('sectorPanel');
+  if (!_sectorData.length) { el.innerHTML = '<div class="sk"><div class="spin"></div></div>'; return; }
+
+  const key = _sectorSortKey;
+  const sorted = [..._sectorData].sort((a,b) => (b[key] ?? -999) - (a[key] ?? -999));
+  const maxAbs = Math.max(...sorted.map(s => Math.abs(s[key] ?? 0)), 0.01);
+
+  const keyLabel = { chg_1w:'1週', chg_1m:'1月', chg_3m:'3月', chg_ytd:'今年' };
+  const groupSep = (group, prev) => (group !== prev)
+    ? `<tr><td colspan="6" style="padding:4px 8px 2px;font-size:9px;font-weight:700;letter-spacing:.5px;color:var(--txt3);border-bottom:1px solid var(--border)">${group==='TW'?'台股':'美股'}</td></tr>`
+    : '';
+
+  let prevGroup = '';
+  const rows = sorted.map(s => {
+    const sep = groupSep(s.group, prevGroup);
+    prevGroup = s.group;
+    const val = s[key] ?? null;
+    const barW = val != null ? Math.round(Math.abs(val) / maxAbs * 60) : 0;
+    const barColor = val >= 0 ? 'var(--green)' : 'var(--red)';
+    const barHtml = `<div class="sector-bar-wrap">
+      ${val != null ? `<div class="sector-bar" style="width:${barW}px;background:${barColor}"></div>
+      <span class="${cls(val)}">${fc(val)}</span>` : '<span style="color:var(--txt3)">-</span>'}
+    </div>`;
+    return sep + `<tr>
+      <td style="color:var(--txt2)">${s.name}</td>
+      <td style="font-size:10px;color:var(--txt3)">${s.ticker}</td>
+      <td style="font-size:10px">${f(s.price,2)}</td>
+      <td class="${cls(s.chg_1w)}">${s.chg_1w!=null?fc(s.chg_1w):'-'}</td>
+      <td class="${cls(s.chg_1m)}">${s.chg_1m!=null?fc(s.chg_1m):'-'}</td>
+      <td>${barHtml}</td>
+    </tr>`;
+  }).join('');
+
+  const colLabel = keyLabel[key] || key;
+  el.innerHTML = `<div style="overflow-x:auto">
+    <table class="sector-table">
+      <thead><tr>
+        <th style="text-align:left">名稱</th>
+        <th>代號</th><th>現價</th>
+        <th class="${key==='chg_1w'?'sorted':''}">1W</th>
+        <th class="${key==='chg_1m'?'sorted':''}">1M</th>
+        <th class="sorted" style="min-width:130px">${colLabel} 強弱</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <div style="font-size:9px;color:var(--txt3);margin-top:8px">排序依據：${colLabel}　資料每 30 分鐘更新</div>`;
+}
+
 /* ─── Settings ────────────────────────────────────────────────────────────── */
 function loadSettings() {
   return {
@@ -1980,8 +2278,13 @@ document.getElementById('cbBaseLabel').textContent = cbBasePct + '%';
 // DCA default start: 2 years ago
 const _2yAgo = new Date(); _2yAgo.setFullYear(_2yAgo.getFullYear() - 2);
 document.getElementById('dcaStart').value = _2yAgo.toISOString().slice(0, 7);
+// Div sim default start: 5 years ago
+const _5yAgo = new Date(); _5yAgo.setFullYear(_5yAgo.getFullYear() - 5);
+document.getElementById('divStart').value = _5yAgo.toISOString().slice(0, 7);
 loadData();
+loadSectorRotation();
 setInterval(loadData, 5 * 60 * 1000);
+setInterval(loadSectorRotation, 30 * 60 * 1000);
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeSearchModal(); closeSettingsModal(); closePfModal(); }
 });
