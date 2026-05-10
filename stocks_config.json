@@ -13,7 +13,11 @@
     "GOOG": "GOOG",
     "NVDA": "NVDA",
     "TSLA": "TSLA",
-    "MSTR": "MSTR"
+    "MSTR": "MSTR",
+    "AMZN": "AMZN",
+    "AAPL": "AAPL",
+    "META": "META",
+    "MSFT": "MSFT"
   },
   "names": {
     "0050":   "元大台灣50",
@@ -25,6 +29,10 @@
     "GOOG":   "Alphabet (Google)",
     "NVDA":   "NVIDIA",
     "TSLA":   "Tesla",
-    "MSTR":   "MicroStrategy"
+    "MSTR":   "MicroStrategy",
+    "AMZN":   "Amazon",
+    "AAPL":   "Apple",
+    "META":   "Meta Platforms",
+    "MSFT":   "Microsoft"
   }
 }
