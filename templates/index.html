@@ -756,6 +756,22 @@ button { cursor: pointer; font-family: inherit; }
     </div>
   </div>
 
+  <!-- Monthly Return Heatmap -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">月報酬率熱力圖</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">季節性規律 · 逐月漲跌分析</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="hmSym" class="pf-select" style="width:110px" onchange="loadHeatmap()"></select>
+      </div>
+    </div>
+    <div class="panel-body" id="heatmapPanel">
+      <div class="sk"><div class="spin"></div></div>
+    </div>
+  </div>
+
   <!-- Cash Bot Panel -->
   <div class="panel">
     <div class="panel-header">
@@ -800,10 +816,18 @@ button { cursor: pointer; font-family: inherit; }
     <div class="panel">
       <div class="panel-header">
         <span class="panel-title">持股損益追蹤</span>
-        <button class="btn btn-ghost" onclick="openPortfolioForm()" style="padding:4px 10px;font-size:11px">+ 新增</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:10px;color:var(--txt3);white-space:nowrap">現金 NT$</label>
+          <input type="number" id="pfCash" class="dca-input" style="width:100px;text-align:right;padding:4px 8px" placeholder="0" oninput="onCashInput(this.value)">
+          <button class="btn btn-ghost" onclick="openPortfolioForm()" style="padding:4px 10px;font-size:11px">+ 新增</button>
+        </div>
       </div>
       <div id="portfolioPanel" style="overflow-x:auto">
         <div class="empty-box">尚未新增持股，點「+ 新增」開始追蹤</div>
+      </div>
+      <div id="pfPieWrap" style="display:none;padding:12px 0 4px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.3px;color:var(--txt3);margin-bottom:8px">資產配置</div>
+        <div style="height:180px;position:relative"><canvas id="pfPieChart"></canvas></div>
       </div>
     </div>
 
@@ -1901,6 +1925,52 @@ function onCbSlider(val) {
 /* ─── Portfolio Tracking ─────────────────────────────────────────────────── */
 let portfolio = JSON.parse(localStorage.getItem('portfolio') || '[]');
 let TW_STOCKS = new Set();
+let pfCashAmt = parseFloat(localStorage.getItem('pfCash') || '0');
+let _pfPieChart = null;
+
+function onCashInput(val) {
+  pfCashAmt = parseFloat(val) || 0;
+  localStorage.setItem('pfCash', String(pfCashAmt));
+  renderPortfolio();
+}
+
+function renderPie(twTwd, usTwd, cashTwd) {
+  const wrap = document.getElementById('pfPieWrap');
+  if (!wrap) return;
+  const total = twTwd + usTwd + cashTwd;
+  if (total <= 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  if (_pfPieChart) { _pfPieChart.destroy(); _pfPieChart = null; }
+  const ctx = document.getElementById('pfPieChart').getContext('2d');
+  _pfPieChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['台股', '美股', '現金'],
+      datasets: [{
+        data: [twTwd, usTwd, cashTwd],
+        backgroundColor: ['rgba(239,68,68,.65)', 'rgba(59,130,246,.65)', 'rgba(100,116,139,.45)'],
+        borderColor:     ['#ef4444', '#3b82f6', '#64748b'],
+        borderWidth: 1,
+        hoverOffset: 6,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      cutout: '62%',
+      plugins: {
+        legend: { position: 'right', labels: { color: '#8896a9', font: { size: 11 }, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const pct = (ctx.parsed / total * 100).toFixed(1);
+              return `${ctx.label}: NT$${Math.round(ctx.parsed).toLocaleString()} (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
 
 function openPortfolioForm() {
   document.getElementById('pfCost').value = '';
@@ -1931,10 +2001,18 @@ function deletePosition(idx) {
 function renderPortfolio() {
   const panel = document.getElementById('portfolioPanel');
   if (!panel) return;
+
+  // Restore cash input
+  const cashEl = document.getElementById('pfCash');
+  if (cashEl && !cashEl.value) cashEl.value = pfCashAmt || '';
+
   if (!portfolio.length) {
-    panel.innerHTML = '<div class="empty-box">尚未新增持股，點「+ 新增」開始追蹤</div>'; return;
+    panel.innerHTML = '<div class="empty-box">尚未新增持股，點「+ 新增」開始追蹤</div>';
+    renderPie(0, 0, pfCashAmt);
+    return;
   }
   let totalCostTwd = 0, totalValueTwd = 0;
+  let twValueTwd = 0, usValueTwd = 0;
   const rows = portfolio.map((pos, idx) => {
     const s     = state?.stocks?.[pos.sym];
     const price = s?.price ?? null;
@@ -1944,7 +2022,10 @@ function renderPortfolio() {
     const valueT = (price != null && rate != null) ? price * pos.shares * rate : null;
     const pnl  = (costT != null && valueT != null) ? valueT - costT : null;
     const pct  = (pnl != null && costT) ? pnl / costT * 100 : null;
-    if (valueT != null) { totalCostTwd += costT; totalValueTwd += valueT; }
+    if (valueT != null) {
+      totalCostTwd += costT; totalValueTwd += valueT;
+      if (isTw) twValueTwd += valueT; else usValueTwd += valueT;
+    }
     return `<tr>
       <td style="color:var(--cyan)">${pos.sym}</td>
       <td>${f(pos.cost,2)}</td>
@@ -1967,6 +2048,8 @@ function renderPortfolio() {
         <td class="${cls(totalPct)}" style="font-weight:700">${fc(totalPct)}</td><td></td>
       </tr></tfoot>` : ''}
     </table>`;
+
+  renderPie(twValueTwd, usValueTwd, pfCashAmt);
 }
 
 /* ─── DCA Calculator ────────────────────────────────────────────────────── */
@@ -2165,6 +2248,103 @@ async function calcDivSim() {
   } catch(e) {
     el.innerHTML = '<div class="empty-box" style="color:var(--red)">請求失敗，請重試</div>';
   }
+}
+
+/* ─── Monthly Return Heatmap ───────────────────────────────────────────────── */
+async function loadHeatmap() {
+  const sym = (document.getElementById('hmSym')?.value || '0050').trim().toUpperCase();
+  const el  = document.getElementById('heatmapPanel');
+  if (!el) return;
+  el.innerHTML = '<div class="sk" style="padding:20px"><div class="spin"></div></div>';
+  try {
+    const r = await fetch(`/api/monthly-returns?sym=${encodeURIComponent(sym)}`);
+    const d = await r.json();
+    if (d.error) { el.innerHTML = `<div class="empty-box" style="color:var(--red)">${d.error}</div>`; return; }
+    el.innerHTML = renderHeatmapHtml(sym, d.data);
+  } catch(e) {
+    el.innerHTML = '<div class="empty-box" style="color:var(--red)">載入失敗，請重試</div>';
+  }
+}
+
+function renderHeatmapHtml(sym, data) {
+  if (!data.length) return '<div class="empty-box">資料不足</div>';
+
+  const MN = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+  // Build year → month map
+  const byYear = {};
+  for (const d of data) {
+    if (!byYear[d.year]) byYear[d.year] = {};
+    byYear[d.year][d.month] = d.return_pct;
+  }
+  const years = Object.keys(byYear).sort((a, b) => b - a);
+
+  // Colour: intensity scales to ±8% (beyond that → full saturation)
+  function cellStyle(v) {
+    if (v == null) return 'background:var(--bg3);color:var(--txt3)';
+    const t = Math.min(Math.abs(v) / 8, 1);
+    const alpha = 0.18 + 0.72 * t;
+    const bg = v >= 0
+      ? `rgba(34,197,94,${alpha.toFixed(2)})`
+      : `rgba(239,68,68,${alpha.toFixed(2)})`;
+    const fg = t > 0.55 ? '#fff' : (v >= 0 ? 'var(--green)' : 'var(--red)');
+    return `background:${bg};color:${fg}`;
+  }
+
+  // Monthly average row
+  const avgByMonth = {};
+  for (const d of data) {
+    if (!avgByMonth[d.month]) avgByMonth[d.month] = [];
+    avgByMonth[d.month].push(d.return_pct);
+  }
+
+  const header = `<tr style="font-size:10px;color:var(--txt3)">
+    <th style="text-align:left;padding:4px 8px;font-weight:600">年份</th>
+    ${MN.map(m => `<th style="padding:4px 6px;font-weight:600;text-align:center">${m}</th>`).join('')}
+    <th style="padding:4px 8px;font-weight:600;text-align:center">全年</th>
+  </tr>`;
+
+  const bodyRows = years.map(yr => {
+    const yd = byYear[yr];
+    let compound = 1;
+    const cells = MN.map((_, i) => {
+      const m = i + 1;
+      const v = yd[m] ?? null;
+      if (v != null) compound *= (1 + v / 100);
+      const txt = v != null ? (v >= 0 ? '+' : '') + v.toFixed(1) + '%' : '-';
+      return `<td style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;padding:5px 4px;text-align:center;border-radius:4px;${cellStyle(v)}">${txt}</td>`;
+    }).join('');
+    const ytd = (compound - 1) * 100;
+    return `<tr>
+      <td style="font-size:11px;font-weight:700;color:var(--cyan);padding:5px 8px">${yr}</td>
+      ${cells}
+      <td style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 8px;text-align:center;${cellStyle(ytd)};border-radius:4px">${ytd >= 0 ? '+' : ''}${ytd.toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+
+  const avgCells = MN.map((_, i) => {
+    const m = i + 1;
+    const vals = avgByMonth[m] || [];
+    const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    const txt = avg != null ? (avg >= 0 ? '+' : '') + avg.toFixed(1) + '%' : '-';
+    return `<td style="font-size:9px;font-weight:700;padding:5px 4px;text-align:center;color:${avg == null ? 'var(--txt3)' : avg >= 0 ? 'var(--green)' : 'var(--red)'}">${txt}</td>`;
+  }).join('');
+  const avgRow = `<tr style="border-top:1px solid var(--border)">
+    <td style="font-size:9px;font-weight:700;color:var(--txt3);padding:5px 8px">月平均</td>
+    ${avgCells}
+    <td></td>
+  </tr>`;
+
+  return `
+  <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:separate;border-spacing:2px;min-width:700px">
+      <thead>${header}</thead>
+      <tbody>${bodyRows}${avgRow}</tbody>
+    </table>
+  </div>
+  <div style="font-size:9px;color:var(--txt3);margin-top:8px">
+    標的：${sym}　深色＝漲跌幅越大　底列為各月歷史平均值
+  </div>`;
 }
 
 /* ─── Sector Rotation ──────────────────────────────────────────────────────── */
@@ -2420,6 +2600,15 @@ async function init() {
     pfSel.innerHTML = ORDER.map(sym =>
       `<option value="${sym}">${sym}${cfg.names[sym] ? ' — ' + cfg.names[sym] : ''}</option>`
     ).join('');
+
+    // Build heatmap sym selector and load default
+    const hmSel = document.getElementById('hmSym');
+    if (hmSel) {
+      hmSel.innerHTML = ORDER.map(sym =>
+        `<option value="${sym}">${sym}</option>`
+      ).join('');
+      loadHeatmap();
+    }
   } catch(e) {
     console.error('Config load failed, using fallback', e);
   }

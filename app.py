@@ -1746,6 +1746,33 @@ def api_backtest():
     return jsonify(_run_sop_backtest(hist, capital))
 
 
+@app.route("/api/monthly-returns")
+def api_monthly_returns():
+    sym = request.args.get("sym", "0050").upper()
+    hist = _cache["histories"].get(sym)
+    if hist is None:
+        ticker = f"{sym}.TW" if re.match(r"^\d", sym) else sym
+        hist = _search_cache.get(ticker, {}).get("hist")
+    if hist is None:
+        return jsonify({"error": f"{sym} 歷史資料未載入，請先在主頁載入此標的"}), 404
+
+    hist_c = hist.dropna(subset=["Close"])
+    monthly_last: dict = {}
+    for idx, row in hist_c.iterrows():
+        monthly_last[(idx.year, idx.month)] = float(row["Close"])
+
+    sorted_months = sorted(monthly_last)
+    result = []
+    for i, ym in enumerate(sorted_months):
+        if i == 0:
+            continue
+        prev = sorted_months[i - 1]
+        ret = (monthly_last[ym] - monthly_last[prev]) / monthly_last[prev] * 100
+        result.append({"year": ym[0], "month": ym[1], "return_pct": round(ret, 2)})
+
+    return jsonify({"sym": sym, "data": result})
+
+
 @app.route("/api/config")
 def api_config():
     tw_syms    = list(TW_SYMBOLS.keys())
