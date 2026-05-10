@@ -2357,15 +2357,15 @@ function renderHeatmapHtml(sym, data) {
   }
   const years = Object.keys(byYear).sort((a, b) => b - a);
 
-  // Colour: intensity scales to ±8% (beyond that → full saturation)
+  // Colour: 台股慣例 — 上漲紅、下跌綠，強度對應 ±8%
   function cellStyle(v) {
     if (v == null) return 'background:var(--bg3);color:var(--txt3)';
     const t = Math.min(Math.abs(v) / 8, 1);
     const alpha = 0.18 + 0.72 * t;
     const bg = v >= 0
-      ? `rgba(34,197,94,${alpha.toFixed(2)})`
-      : `rgba(239,68,68,${alpha.toFixed(2)})`;
-    const fg = t > 0.55 ? '#fff' : (v >= 0 ? 'var(--green)' : 'var(--red)');
+      ? `rgba(239,68,68,${alpha.toFixed(2)})`
+      : `rgba(34,197,94,${alpha.toFixed(2)})`;
+    const fg = t > 0.55 ? '#fff' : (v >= 0 ? 'var(--red)' : 'var(--green)');
     return `background:${bg};color:${fg}`;
   }
 
@@ -2520,11 +2520,11 @@ function pcrLabel(v) {
 }
 function pcrColor(v) {
   if (v == null) return 'var(--txt2)';
-  if (v > 130) return 'var(--green)';
-  if (v > 110) return '#86efac';
-  if (v > 90)  return 'var(--yellow)';
-  if (v > 70)  return '#fb923c';
-  return 'var(--red)';
+  if (v > 130) return '#9333ea';   /* 深紫 — 極度恐慌 */
+  if (v > 110) return '#c084fc';   /* 中紫 — 偏向恐慌 */
+  if (v > 90)  return 'var(--yellow)'; /* 黃   — 中性     */
+  if (v > 70)  return '#67e8f9';   /* 淡藍 — 偏向樂觀 */
+  return '#22d3ee';                /* 亮青 — 極度樂觀 */
 }
 
 function renderValuation(pe, pcr) {
