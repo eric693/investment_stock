@@ -731,18 +731,7 @@ button { cursor: pointer; font-family: inherit; }
     <div class="panel">
       <div class="panel-header">
         <span class="panel-title">收盤價 &amp; 移動平均線</span>
-        <div class="chart-tabs" id="chartTabs">
-          <button class="ctab active" onclick="switchChart(this,'0050')">0050</button>
-          <button class="ctab"        onclick="switchChart(this,'QQQ')">QQQ</button>
-          <button class="ctab"        onclick="switchChart(this,'00631L')">00631L</button>
-          <button class="ctab"        onclick="switchChart(this,'QLD')">QLD</button>
-          <button class="ctab"        onclick="switchChart(this,'00662')">00662</button>
-          <button class="ctab"        onclick="switchChart(this,'00865B')">00865B</button>
-          <button class="ctab"        onclick="switchChart(this,'GOOG')">GOOG</button>
-          <button class="ctab"        onclick="switchChart(this,'NVDA')">NVDA</button>
-          <button class="ctab"        onclick="switchChart(this,'TSLA')">TSLA</button>
-          <button class="ctab"        onclick="switchChart(this,'MSTR')">MSTR</button>
-        </div>
+        <div class="chart-tabs" id="chartTabs"></div>
       </div>
       <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
       <div class="chart-legend">
@@ -955,10 +944,7 @@ button { cursor: pointer; font-family: inherit; }
     </div>
     <div class="settings-row">
       <span class="settings-lbl">股票代號</span>
-      <select class="pf-select" id="pfSym">
-        <option>0050</option><option>00631L</option><option>00662</option><option>00865B</option>
-        <option>QQQ</option><option>QLD</option><option>GOOG</option><option>NVDA</option><option>TSLA</option><option>MSTR</option>
-      </select>
+      <select class="pf-select" id="pfSym"></select>
     </div>
     <div class="settings-row">
       <span class="settings-lbl">買入成本（每股）</span>
@@ -1138,14 +1124,8 @@ function renderUsdTwd(data) {
 }
 
 /* ── Stock grid ── */
-const NAMES = {
-  '0050':'元大台灣50', 'QQQ':'Invesco QQQ',
-  '00631L':'台灣50正2', 'QLD':'Ultra QQQ (2x)',
-  '00662':'富邦NASDAQ', '00865B':'國泰US短債',
-  'GOOG':'Alphabet (Google)', 'NVDA':'NVIDIA', 'TSLA':'Tesla',
-  'MSTR':'MicroStrategy',
-};
-const ORDER = ['0050','QQQ','00631L','QLD','00662','00865B','GOOG','NVDA','TSLA','MSTR'];
+let NAMES = {};
+let ORDER = [];
 
 function rsiColor(v) {
   if (v == null) return 'var(--txt2)';
@@ -1187,14 +1167,14 @@ function divBanner(div) {
   return '';
 }
 
-const TW_ORDER = ['0050','QQQ','00631L','QLD','00662','00865B'];
-const US_ORDER = ['GOOG','NVDA','TSLA','MSTR'];
+let TW_ORDER = [];
+let US_ORDER = [];
 
 function _buildCard(sym, s) {
   if (!s) return `<div class="scard flat" id="card-${sym}"><div class="sk"><div class="spin"></div></div></div>`;
   const dc      = s.daily_change;
   const cardCls = dc > 0 ? 'up' : dc < 0 ? 'down' : 'flat';
-  const isTwStock = ['0050','00631L','00662','00865B'].includes(sym);
+  const isTwStock = TW_STOCKS.has(sym);
   const twdLine = (!isTwStock && usdTwd && s.price)
     ? `<div style="font-size:10px;color:var(--txt3);margin-top:1px">≈ NT$${Math.round(s.price * usdTwd.rate).toLocaleString()}</div>`
     : '';
@@ -1495,7 +1475,7 @@ function renderMarketSentiment(vix, fn, fg) {
 /* ── Search ── */
 let searchChart = null;
 
-const KNOWN_SYMS = new Set([...TW_ORDER, ...US_ORDER]);
+const knownSyms = () => new Set([...TW_ORDER, ...US_ORDER]);
 
 async function doSearch() {
   const raw = document.getElementById('searchInput').value.trim();
@@ -1503,7 +1483,7 @@ async function doSearch() {
   const q = raw.toUpperCase();
 
   // If the symbol is already on the main page, scroll to it
-  if (KNOWN_SYMS.has(q)) {
+  if (knownSyms().has(q)) {
     document.getElementById('searchInput').value = '';
     const card = document.getElementById(`card-${q}`);
     if (card) {
@@ -1775,7 +1755,7 @@ function renderChips(chips) {
   if (!panel) return;
   if (!chips) { panel.innerHTML = '<div class="empty-box">籌碼資料載入中…</div>'; return; }
 
-  const CHIP_CODES = ['0050','00631L','00662','00865B'];
+  const CHIP_CODES = [...TW_STOCKS];
   const dateEl = document.getElementById('chipDate');
   const anyDate = CHIP_CODES.map(c => chips[c]?.date).find(Boolean);
   if (dateEl && anyDate) dateEl.textContent = anyDate;
@@ -1905,7 +1885,7 @@ function onCbSlider(val) {
 
 /* ─── Portfolio Tracking ─────────────────────────────────────────────────── */
 let portfolio = JSON.parse(localStorage.getItem('portfolio') || '[]');
-const TW_STOCKS = new Set(['0050','00631L','00662','00865B']);
+let TW_STOCKS = new Set();
 
 function openPortfolioForm() {
   document.getElementById('pfCost').value = '';
@@ -2286,8 +2266,40 @@ document.getElementById('dcaStart').value = _2yAgo.toISOString().slice(0, 7);
 // Div sim default start: 5 years ago
 const _5yAgo = new Date(); _5yAgo.setFullYear(_5yAgo.getFullYear() - 5);
 document.getElementById('divStart').value = _5yAgo.toISOString().slice(0, 7);
-loadData();
-loadSectorRotation();
+
+async function init() {
+  try {
+    const r   = await fetch('/api/config');
+    const cfg = await r.json();
+
+    // Populate derived globals from backend config (single source of truth)
+    NAMES    = cfg.names;
+    TW_ORDER = [...cfg.tw_symbols, ...cfg.us_td_symbols];
+    US_ORDER = [...cfg.us_yf_symbols];
+    ORDER    = [...TW_ORDER, ...US_ORDER];
+    TW_STOCKS = new Set(cfg.tw_symbols);
+
+    // Build chart tabs dynamically
+    const tabsEl = document.getElementById('chartTabs');
+    tabsEl.innerHTML = ORDER.map((sym, i) =>
+      `<button class="ctab${i===0?' active':''}" onclick="switchChart(this,'${sym}')">${sym}</button>`
+    ).join('');
+    curSym = ORDER[0] || '0050';
+
+    // Build portfolio form dropdown dynamically
+    const pfSel = document.getElementById('pfSym');
+    pfSel.innerHTML = ORDER.map(sym =>
+      `<option value="${sym}">${sym}${cfg.names[sym] ? ' — ' + cfg.names[sym] : ''}</option>`
+    ).join('');
+  } catch(e) {
+    console.error('Config load failed, using fallback', e);
+  }
+
+  loadData();
+  loadSectorRotation();
+}
+
+init();
 setInterval(loadData, 5 * 60 * 1000);
 setInterval(loadSectorRotation, 30 * 60 * 1000);
 document.addEventListener('keydown', e => {

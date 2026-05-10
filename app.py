@@ -1673,6 +1673,20 @@ def api_backtest():
     return jsonify(_run_sop_backtest(hist, capital))
 
 
+@app.route("/api/config")
+def api_config():
+    tw_syms    = list(TW_SYMBOLS.keys())
+    us_td_syms = list(US_SYMBOLS.keys())
+    us_yf_syms = list(YF_US_SYMBOLS.keys())
+    return jsonify({
+        "tw_symbols":    tw_syms,
+        "us_td_symbols": us_td_syms,
+        "us_yf_symbols": us_yf_syms,
+        "all_symbols":   tw_syms + us_td_syms + us_yf_syms,
+        "names":         SYMBOL_NAMES,
+    })
+
+
 @app.route("/api/dca")
 def api_dca():
     sym = request.args.get("sym", "0050").upper()
