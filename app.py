@@ -84,15 +84,14 @@ GLOBAL_SYMBOLS = {
     "SOXX":  "費半ETF",
 }
 SECTOR_SYMBOLS = {
-    "0050.TW": {"name": "台灣大盤",   "group": "TW"},
-    "0052.TW": {"name": "電子(0052)", "group": "TW"},
-    "0055.TW": {"name": "金融(0055)", "group": "TW"},
-    "0056.TW": {"name": "高股息(0056)","group": "TW"},
-    "^GSPC":   {"name": "S&P 500",   "group": "US"},
-    "SOXX":    {"name": "費半(SOXX)", "group": "US"},
-    "XLK":     {"name": "科技(XLK)", "group": "US"},
-    "XLF":     {"name": "金融(XLF)", "group": "US"},
-    "XLE":     {"name": "能源(XLE)", "group": "US"},
+    "0050.TW":   {"name": "台灣大盤",        "group": "TW"},
+    "00670L.TW": {"name": "NASDAQ正2(00670L)","group": "TW"},
+    "00631L.TW": {"name": "台50正2(00631L)",  "group": "TW"},
+    "^GSPC":     {"name": "S&P 500",         "group": "US"},
+    "SOXX":      {"name": "費半(SOXX)",       "group": "US"},
+    "XLK":       {"name": "科技(XLK)",        "group": "US"},
+    "XLF":       {"name": "金融(XLF)",        "group": "US"},
+    "XLE":       {"name": "能源(XLE)",        "group": "US"},
 }
 _refresh_lock = threading.Lock()
 _line_users: dict = {}
@@ -698,7 +697,7 @@ def _fetch_yahoo_dividends(ticker: str) -> list[dict]:
 
 
 def _run_dividend_sim(hist: pd.DataFrame, dividends: list[dict],
-                      capital: float, start_str: str) -> dict:
+                      capital: float, start_str: str, end_str: str = "") -> dict:
     hist_c = hist.dropna(subset=["Close"])
     if re.match(r"^\d{4}-\d{2}$", start_str):
         start_dt = pd.Timestamp(f"{start_str}-01")
@@ -707,6 +706,9 @@ def _run_dividend_sim(hist: pd.DataFrame, dividends: list[dict],
         start_dt = pd.Timestamp(td.year - 5, 1, 1)
 
     hist_f = hist_c[hist_c.index >= start_dt]
+    if re.match(r"^\d{4}-\d{2}$", end_str):
+        end_dt = pd.Timestamp(f"{end_str}-01") + pd.offsets.MonthEnd(1)
+        hist_f = hist_f[hist_f.index <= end_dt]
     if hist_f.empty:
         return {"error": "指定期間內無資料，請調整起始月份"}
 
@@ -858,8 +860,13 @@ def _fetch_global_quotes() -> dict:
 
 
 # ─── SOP 回測 ────────────────────────────────────────────────────────────────
-def _run_sop_backtest(hist: pd.DataFrame, capital: float) -> dict:
+def _run_sop_backtest(hist: pd.DataFrame, capital: float,
+                      start_str: str = "", end_str: str = "") -> dict:
     df = hist[["Close", "MA200"]].copy().dropna(subset=["MA200"])
+    if re.match(r"^\d{4}-\d{2}$", start_str):
+        df = df[df.index >= pd.Timestamp(f"{start_str}-01")]
+    if re.match(r"^\d{4}-\d{2}$", end_str):
+        df = df[df.index <= pd.Timestamp(f"{end_str}-01") + pd.offsets.MonthEnd(1)]
     if len(df) < 30:
         return {"error": "歷史資料不足（需至少 30 個交易日含 MA200）"}
     df["daily_chg"] = df["Close"].pct_change() * 100
@@ -1697,6 +1704,7 @@ def api_dividend_sim():
     try:    capital = float(request.args.get("capital", "1000000"))
     except: capital = 1_000_000
     start_str = request.args.get("start", "")
+    end_str   = request.args.get("end",   "")
 
     ticker = f"{sym}.TW" if re.match(r"^\d", sym) else sym
     now    = time.time()
@@ -1719,7 +1727,7 @@ def api_dividend_sim():
 
     if not divs:
         return jsonify({"error": f"「{sym}」找不到配息記錄，請確認為高股息標的"}), 404
-    return jsonify(_run_dividend_sim(hist, divs, capital, start_str))
+    return jsonify(_run_dividend_sim(hist, divs, capital, start_str, end_str))
 
 
 @app.route("/api/sector-rotation")
@@ -1733,6 +1741,28 @@ def api_sector_rotation():
     return jsonify(_cache.get("sector", []))
 
 
+def _resolve_hist(sym: str) -> pd.DataFrame | None:
+    """Return history DataFrame for any symbol, fetching on-demand if needed."""
+    hist = _cache["histories"].get(sym)
+    if hist is not None:
+        return hist
+    is_tw  = bool(re.match(r"^\d", sym))
+    ticker = f"{sym}.TW" if is_tw else sym
+    now    = time.time()
+    cached = _search_cache.get(ticker, {})
+    if now - cached.get("hist_ts", 0) < SEARCH_HIST_TTL and cached.get("hist") is not None:
+        return cached["hist"]
+    hist = _fetch_yahoo_history(ticker)
+    if hist is not None:
+        cached["hist"]    = hist
+        cached["hist_ts"] = now
+        if len(_search_cache) > 100:
+            oldest = min(_search_cache, key=lambda k: _search_cache[k].get("hist_ts", 0))
+            _search_cache.pop(oldest, None)
+        _search_cache[ticker] = cached
+    return hist
+
+
 @app.route("/api/backtest")
 def api_backtest():
     sym = request.args.get("sym", "0050").upper()
@@ -1740,21 +1770,20 @@ def api_backtest():
         capital = float(request.args.get("capital", "1000000"))
     except (ValueError, TypeError):
         capital = 1_000_000
-    hist = _cache["histories"].get(sym)
+    start_str = request.args.get("start", "")
+    end_str   = request.args.get("end",   "")
+    hist = _resolve_hist(sym)
     if hist is None:
-        return jsonify({"error": f"{sym} 歷史資料未載入，請稍後再試"}), 404
-    return jsonify(_run_sop_backtest(hist, capital))
+        return jsonify({"error": f"{sym} 歷史資料取得失敗，請確認代號正確"}), 404
+    return jsonify(_run_sop_backtest(hist, capital, start_str, end_str))
 
 
 @app.route("/api/monthly-returns")
 def api_monthly_returns():
     sym = request.args.get("sym", "0050").upper()
-    hist = _cache["histories"].get(sym)
+    hist = _resolve_hist(sym)
     if hist is None:
-        ticker = f"{sym}.TW" if re.match(r"^\d", sym) else sym
-        hist = _search_cache.get(ticker, {}).get("hist")
-    if hist is None:
-        return jsonify({"error": f"{sym} 歷史資料未載入，請先在主頁載入此標的"}), 404
+        return jsonify({"error": f"{sym} 歷史資料取得失敗，請確認代號正確"}), 404
 
     hist_c = hist.dropna(subset=["Close"])
     monthly_last: dict = {}
@@ -1793,10 +1822,11 @@ def api_dca():
     try:    monthly = float(request.args.get("monthly", "10000"))
     except: monthly = 10000.0
     start_str = request.args.get("start", "")
+    end_str   = request.args.get("end",   "")
 
-    hist = _cache["histories"].get(sym)
+    hist = _resolve_hist(sym)
     if hist is None:
-        return jsonify({"error": f"{sym} 歷史資料未載入"}), 404
+        return jsonify({"error": f"{sym} 歷史資料取得失敗，請確認代號正確"}), 404
 
     hist_c = hist.dropna(subset=["Close"])
     if hist_c.empty:
@@ -1808,12 +1838,17 @@ def api_dca():
     else:
         sy = today.year - 2; sm = today.month
 
+    if re.match(r"^\d{4}-\d{2}$", end_str):
+        ey, em = int(end_str[:4]), int(end_str[5:7])
+    else:
+        ey, em = today.year, today.month
+
     rows: list = []
     total_invested = 0.0
     total_shares   = 0.0
     y, m = sy, sm
 
-    while (y < today.year) or (y == today.year and m <= today.month):
+    while (y < ey) or (y == ey and m <= em):
         month_data = hist_c[(hist_c.index.year == y) & (hist_c.index.month == m)]
         if not month_data.empty:
             price = float(month_data["Close"].iloc[0])
@@ -1828,18 +1863,21 @@ def api_dca():
     if not rows:
         return jsonify({"error": "指定期間內無資料，請調整起始月份"}), 404
 
-    current_price = float(hist_c["Close"].iloc[-1])
+    end_hist = hist_c[hist_c.index <= pd.Timestamp(f"{ey}-{em:02d}-01") + pd.offsets.MonthEnd(1)]
+    current_price = float(end_hist["Close"].iloc[-1]) if not end_hist.empty else float(hist_c["Close"].iloc[-1])
     current_value = total_shares * current_price
     profit        = current_value - total_invested
     ret_pct       = profit / total_invested * 100 if total_invested else 0
     avg_cost      = total_invested / total_shares  if total_shares   else 0
 
-    span_d = max((date(today.year, today.month, 1) - date(sy, sm, 1)).days, 1)
+    span_d = max((date(ey, em, 1) - date(sy, sm, 1)).days, 1)
     cagr   = ((current_value / total_invested) ** (365.0 / span_d) - 1) * 100 if total_invested else 0
 
     return jsonify({
         "sym":            sym,
         "monthly":        monthly,
+        "start_date":     f"{sy}-{sm:02d}",
+        "end_date":       f"{ey}-{em:02d}",
         "total_invested": round(total_invested),
         "total_shares":   round(total_shares, 4),
         "current_price":  round(current_price, 2),

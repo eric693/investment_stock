@@ -195,7 +195,7 @@ button { cursor: pointer; font-family: inherit; }
   display: grid;
   grid-template-columns: 1fr 340px;
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* ─── Panel base ──────────────────────────────────────────────────────── */
@@ -209,19 +209,17 @@ button { cursor: pointer; font-family: inherit; }
 .panel-body  { padding: 16px 18px; }
 
 /* ─── Chart panel ─────────────────────────────────────────────────────── */
-.chart-tabs { display: flex; gap: 4px; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
-.chart-tabs::-webkit-scrollbar { height: 3px; }
-.chart-tabs::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+.chart-tabs { display: flex; gap: 4px; flex-wrap: wrap; padding-bottom: 2px; }
 .ctab {
   background: none; border: 1px solid var(--border);
   color: var(--txt2); padding: 4px 12px; border-radius: 6px;
   font-size: 11px; font-weight: 600; transition: all .15s;
-  flex-shrink: 0;
+  flex: 1 1 auto; text-align: center; min-width: 60px;
 }
 .ctab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ctab:hover:not(.active) { background: var(--bg3); }
 
-.chart-wrap   { padding: 16px 18px 0; height: 300px; position: relative; }
+.chart-wrap   { padding: 16px 18px 0; flex: 1; min-height: 300px; position: relative; }
 .chart-legend { display: flex; gap: 16px; padding: 10px 18px 14px; }
 .leg-item     { display: flex; align-items: center; gap: 6px; }
 .leg-line     { width: 20px; height: 2px; border-radius: 1px; }
@@ -728,8 +726,8 @@ button { cursor: pointer; font-family: inherit; }
   <div class="content-row">
 
     <!-- Chart panel -->
-    <div class="panel">
-      <div class="panel-header">
+    <div class="panel" style="display:flex;flex-direction:column">
+      <div class="panel-header" style="flex-direction:column;align-items:stretch;gap:10px">
         <span class="panel-title">收盤價 &amp; 移動平均線</span>
         <div class="chart-tabs" id="chartTabs"></div>
       </div>
@@ -816,9 +814,13 @@ button { cursor: pointer; font-family: inherit; }
     <div class="panel">
       <div class="panel-header">
         <span class="panel-title">持股損益追蹤</span>
-        <div style="display:flex;align-items:center;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <select id="pfUserSel" class="pf-select" style="min-width:80px" onchange="switchPfUser(this.value)"></select>
+          <button class="btn btn-ghost" onclick="addPfUser()" style="padding:4px 8px;font-size:11px">＋使用者</button>
+          <button class="btn btn-ghost" onclick="delPfUser()" style="padding:4px 8px;font-size:11px;color:var(--red)">✕</button>
+          <div style="width:1px;height:16px;background:var(--border)"></div>
           <label style="font-size:10px;color:var(--txt3);white-space:nowrap">現金 NT$</label>
-          <input type="number" id="pfCash" class="dca-input" style="width:100px;text-align:right;padding:4px 8px" placeholder="0" oninput="onCashInput(this.value)">
+          <input type="number" id="pfCash" class="dca-input" style="width:90px;text-align:right;padding:4px 8px" placeholder="0" oninput="onCashInput(this.value)">
           <button class="btn btn-ghost" onclick="openPortfolioForm()" style="padding:4px 10px;font-size:11px">+ 新增</button>
         </div>
       </div>
@@ -850,7 +852,11 @@ button { cursor: pointer; font-family: inherit; }
             <label class="dca-label">起始年月</label>
             <input class="dca-input dca-month" id="dcaStart" type="month">
           </div>
-          <div style="display:flex;align-items:flex-end">
+          <div>
+            <label class="dca-label">結束年月</label>
+            <input class="dca-input dca-month" id="dcaEnd" type="month">
+          </div>
+          <div style="display:flex;align-items:flex-end;grid-column:1/-1">
             <button class="btn btn-primary" onclick="calcDca()" style="width:100%;justify-content:center">開始試算</button>
           </div>
         </div>
@@ -868,7 +874,9 @@ button { cursor: pointer; font-family: inherit; }
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <input class="dca-input" id="btSym" value="0050" style="width:70px;text-align:center;text-transform:uppercase">
-        <input class="dca-input" id="btCapital" type="number" value="1000000" style="width:120px;text-align:right" placeholder="初始資金">
+        <input class="dca-input" id="btCapital" type="number" value="1000000" style="width:110px;text-align:right" placeholder="初始資金">
+        <input class="dca-input dca-month" id="btStart" type="month" style="width:130px" placeholder="起始年月">
+        <input class="dca-input dca-month" id="btEnd"   type="month" style="width:130px" placeholder="結束年月">
         <button class="btn btn-ghost" onclick="runBacktest()">開始回測</button>
       </div>
     </div>
@@ -892,8 +900,9 @@ button { cursor: pointer; font-family: inherit; }
           <option value="custom">自訂…</option>
         </select>
         <input class="dca-input" id="divSymCustom" placeholder="代號" style="width:70px;display:none;text-transform:uppercase">
-        <input class="dca-input" id="divCapital" type="number" value="1000000" style="width:120px;text-align:right" placeholder="初始資金">
-        <input class="dca-input dca-month" id="divStart" type="month">
+        <input class="dca-input" id="divCapital" type="number" value="1000000" style="width:110px;text-align:right" placeholder="初始資金">
+        <input class="dca-input dca-month" id="divStart" type="month" style="width:130px">
+        <input class="dca-input dca-month" id="divEnd"   type="month" style="width:130px" placeholder="結束年月">
         <button class="btn btn-ghost" onclick="calcDivSim()">開始模擬</button>
       </div>
     </div>
@@ -1135,6 +1144,7 @@ function render() {
   renderValuation(state.taiex_pe, state.pcr);
   renderCashBot(cbBasePct);
   renderChips(state.tw_chips);
+  renderUserSelect();
   renderPortfolio();
 }
 
@@ -1923,14 +1933,75 @@ function onCbSlider(val) {
 }
 
 /* ─── Portfolio Tracking ─────────────────────────────────────────────────── */
-let portfolio = JSON.parse(localStorage.getItem('portfolio') || '[]');
 let TW_STOCKS = new Set();
-let pfCashAmt = parseFloat(localStorage.getItem('pfCash') || '0');
 let _pfPieChart = null;
+
+/* ── Multi-user portfolio ── */
+let pfUsers    = JSON.parse(localStorage.getItem('pfUsers') || '["預設"]');
+let pfCurUser  = localStorage.getItem('pfCurUser') || pfUsers[0];
+if (!pfUsers.includes(pfCurUser)) pfCurUser = pfUsers[0];
+
+function _pfKey(user, type) { return `pf_${type}_${user}`; }
+function _loadUserPortfolio(user) {
+  return JSON.parse(localStorage.getItem(_pfKey(user, 'pos')) || '[]');
+}
+function _loadUserCash(user) {
+  return parseFloat(localStorage.getItem(_pfKey(user, 'cash')) || '0');
+}
+function _saveUsers() { localStorage.setItem('pfUsers', JSON.stringify(pfUsers)); }
+
+let portfolio = _loadUserPortfolio(pfCurUser);
+let pfCashAmt = _loadUserCash(pfCurUser);
+
+function renderUserSelect() {
+  const sel = document.getElementById('pfUserSel');
+  if (!sel) return;
+  sel.innerHTML = pfUsers.map(u =>
+    `<option value="${u}"${u===pfCurUser?' selected':''}>${u}</option>`
+  ).join('');
+}
+
+function switchPfUser(user) {
+  pfCurUser = user;
+  localStorage.setItem('pfCurUser', user);
+  portfolio = _loadUserPortfolio(user);
+  pfCashAmt = _loadUserCash(user);
+  const cashEl = document.getElementById('pfCash');
+  if (cashEl) cashEl.value = pfCashAmt || '';
+  renderPortfolio();
+}
+
+function addPfUser() {
+  const name = prompt('新使用者名稱：', '');
+  if (!name || !name.trim()) return;
+  const n = name.trim();
+  if (pfUsers.includes(n)) { toast('使用者已存在', false); return; }
+  pfUsers.push(n);
+  _saveUsers();
+  renderUserSelect();
+  switchPfUser(n);
+}
+
+function delPfUser() {
+  if (pfUsers.length <= 1) { toast('至少保留一個使用者', false); return; }
+  if (!confirm(`確定刪除「${pfCurUser}」及其所有持股？`)) return;
+  localStorage.removeItem(_pfKey(pfCurUser, 'pos'));
+  localStorage.removeItem(_pfKey(pfCurUser, 'cash'));
+  pfUsers = pfUsers.filter(u => u !== pfCurUser);
+  _saveUsers();
+  pfCurUser = pfUsers[0];
+  localStorage.setItem('pfCurUser', pfCurUser);
+  portfolio = _loadUserPortfolio(pfCurUser);
+  pfCashAmt = _loadUserCash(pfCurUser);
+  renderUserSelect();
+  const cashEl = document.getElementById('pfCash');
+  if (cashEl) cashEl.value = pfCashAmt || '';
+  renderPortfolio();
+}
 
 function onCashInput(val) {
   pfCashAmt = parseFloat(val) || 0;
-  localStorage.setItem('pfCash', String(pfCashAmt));
+  localStorage.setItem(_pfKey(pfCurUser, 'cash'), String(pfCashAmt));
   renderPortfolio();
 }
 
@@ -1988,13 +2059,13 @@ function savePosition() {
     toast('請填寫所有欄位，且數值須大於 0', false); return;
   }
   portfolio.push({ sym, cost, shares });
-  localStorage.setItem('portfolio', JSON.stringify(portfolio));
+  localStorage.setItem(_pfKey(pfCurUser, 'pos'), JSON.stringify(portfolio));
   closePfModal(); renderPortfolio(); toast(`已新增 ${sym} 持股`);
 }
 
 function deletePosition(idx) {
   portfolio.splice(idx, 1);
-  localStorage.setItem('portfolio', JSON.stringify(portfolio));
+  localStorage.setItem(_pfKey(pfCurUser, 'pos'), JSON.stringify(portfolio));
   renderPortfolio();
 }
 
@@ -2057,27 +2128,31 @@ async function calcDca() {
   const sym     = (document.getElementById('dcaSym').value || '0050').trim().toUpperCase();
   const monthly = parseFloat(document.getElementById('dcaMonthly').value);
   const start   = document.getElementById('dcaStart').value;
+  const end     = document.getElementById('dcaEnd').value;
   if (isNaN(monthly) || monthly <= 0) { toast('請輸入有效金額', false); return; }
   const el = document.getElementById('dcaResults');
   el.innerHTML = '<div class="sk" style="padding:16px"><div class="spin"></div></div>';
   try {
-    const r = await fetch(`/api/dca?sym=${encodeURIComponent(sym)}&monthly=${monthly}${start?'&start='+encodeURIComponent(start):''}`);
+    const r = await fetch(`/api/dca?sym=${encodeURIComponent(sym)}&monthly=${monthly}${start?'&start='+encodeURIComponent(start):''}${end?'&end='+encodeURIComponent(end):''}`);
     const d = await r.json();
     if (d.error) { el.innerHTML = `<div class="empty-box" style="color:var(--red)">${d.error}</div>`; return; }
     const isTw = TW_STOCKS.has(d.sym);
     const curr = isTw ? 'NT$' : 'USD ';
     el.innerHTML = `
       <hr class="scard-divider">
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">
+        期間：${d.start_date} ～ ${d.end_date}　每月投入 ${curr}${monthly.toLocaleString()}
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
         <div class="bt-card"><div class="bt-card-label">總投入</div><div class="bt-card-val" style="font-size:16px">${curr}${d.total_invested.toLocaleString()}</div></div>
-        <div class="bt-card"><div class="bt-card-label">目前總值</div><div class="bt-card-val ${cls(d.profit)}" style="font-size:16px">${curr}${d.current_value.toLocaleString()}</div></div>
-        <div class="bt-card"><div class="bt-card-label">未實現損益</div><div class="bt-card-val ${cls(d.profit)}" style="font-size:16px">${d.profit>=0?'+':''}${curr}${d.profit.toLocaleString()}</div></div>
+        <div class="bt-card"><div class="bt-card-label">結算總值</div><div class="bt-card-val ${cls(d.profit)}" style="font-size:16px">${curr}${d.current_value.toLocaleString()}</div></div>
+        <div class="bt-card"><div class="bt-card-label">損益</div><div class="bt-card-val ${cls(d.profit)}" style="font-size:16px">${d.profit>=0?'+':''}${curr}${d.profit.toLocaleString()}</div></div>
         <div class="bt-card"><div class="bt-card-label">年化報酬率</div><div class="bt-card-val ${cls(d.cagr)}" style="font-size:16px">${fc(d.cagr)}</div></div>
       </div>
       <div class="scard-metrics">
         <div class="metric-row"><span class="metric-lbl">累積股數</span><span class="metric-val">${d.total_shares.toLocaleString()}</span></div>
         <div class="metric-row"><span class="metric-lbl">平均每股成本</span><span class="metric-val">${curr}${f(d.avg_cost)}</span></div>
-        <div class="metric-row"><span class="metric-lbl">現價</span><span class="metric-val">${curr}${f(d.current_price)}</span></div>
+        <div class="metric-row"><span class="metric-lbl">結算價</span><span class="metric-val">${curr}${f(d.current_price)}</span></div>
         <div class="metric-row"><span class="metric-lbl">總報酬率</span><span class="metric-val ${cls(d.return_pct)}">${fc(d.return_pct)}</span></div>
       </div>`;
   } catch(e) {
@@ -2089,10 +2164,12 @@ async function calcDca() {
 async function runBacktest() {
   const sym     = (document.getElementById('btSym').value || '0050').trim().toUpperCase();
   const capital = parseFloat(document.getElementById('btCapital').value) || 1000000;
+  const btStart = document.getElementById('btStart').value;
+  const btEnd   = document.getElementById('btEnd').value;
   const el      = document.getElementById('backtestPanel');
   el.innerHTML  = '<div class="sk" style="padding:20px"><div class="spin"></div></div>';
   try {
-    const r = await fetch(`/api/backtest?sym=${encodeURIComponent(sym)}&capital=${capital}`);
+    const r = await fetch(`/api/backtest?sym=${encodeURIComponent(sym)}&capital=${capital}${btStart?'&start='+encodeURIComponent(btStart):''}${btEnd?'&end='+encodeURIComponent(btEnd):''}`);
     const d = await r.json();
     if (d.error) { el.innerHTML = `<div class="empty-box" style="color:var(--red)">${d.error}</div>`; return; }
     const isTw  = TW_STOCKS.has(sym);
@@ -2153,11 +2230,12 @@ async function calcDivSim() {
   if (!sym) { toast('請輸入股票代號', false); return; }
   const capital = parseFloat(document.getElementById('divCapital').value) || 1000000;
   const start   = document.getElementById('divStart').value;
+  const divEnd  = document.getElementById('divEnd').value;
   const el = document.getElementById('divSimPanel');
   el.innerHTML = '<div class="sk" style="padding:20px"><div class="spin"></div></div>';
 
   try {
-    const qs = `sym=${encodeURIComponent(sym)}&capital=${capital}${start ? '&start=' + encodeURIComponent(start) : ''}`;
+    const qs = `sym=${encodeURIComponent(sym)}&capital=${capital}${start ? '&start=' + encodeURIComponent(start) : ''}${divEnd ? '&end=' + encodeURIComponent(divEnd) : ''}`;
     const r = await fetch(`/api/dividend-sim?${qs}`);
     const d = await r.json();
     if (d.error) { el.innerHTML = `<div class="empty-box" style="color:var(--red)">${d.error}</div>`; return; }
