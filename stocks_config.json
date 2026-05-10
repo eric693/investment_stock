@@ -13,14 +13,14 @@
     "QLD": { "symbol": "QLD", "exchange": "" }
   },
   "us_yf_symbols": {
-    "GOOG": "GOOG",
-    "NVDA": "NVDA",
-    "TSLA": "TSLA",
-    "MSTR": "MSTR",
-    "AMZN": "AMZN",
     "AAPL": "AAPL",
+    "AMZN": "AMZN",
+    "GOOG": "GOOG",
     "META": "META",
-    "MSFT": "MSFT"
+    "MSFT": "MSFT",
+    "MSTR": "MSTR",
+    "NVDA": "NVDA",
+    "TSLA": "TSLA"
   },
   "names": {
     "0050":   "元大台灣50",

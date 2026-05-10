@@ -762,7 +762,13 @@ button { cursor: pointer; font-family: inherit; }
         <span style="font-size:10px;color:var(--txt3);margin-left:10px">季節性規律 · 逐月漲跌分析</span>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <select id="hmSym" class="pf-select" style="width:110px" onchange="loadHeatmap()"></select>
+        <datalist id="hmSymList"></datalist>
+        <input id="hmSym" class="dca-input" list="hmSymList"
+               style="width:110px;text-transform:uppercase" placeholder="代號"
+               autocomplete="off" spellcheck="false"
+               onchange="loadHeatmap()"
+               onkeydown="if(event.key==='Enter')loadHeatmap()">
+        <button class="btn btn-ghost" onclick="loadHeatmap()" style="padding:4px 10px;font-size:11px">查詢</button>
       </div>
     </div>
     <div class="panel-body" id="heatmapPanel">
@@ -1937,6 +1943,16 @@ let TW_STOCKS = new Set();
 let _pfPieChart = null;
 
 /* ── Multi-user portfolio ── */
+// Migrate pre-multi-user data (one-time)
+(function migrateOldPortfolio() {
+  if (!localStorage.getItem('pfUsers')) {
+    const oldPos  = localStorage.getItem('portfolio');
+    const oldCash = localStorage.getItem('pfCash');
+    if (oldPos)  { localStorage.setItem('pf_pos_預設',  oldPos);  localStorage.removeItem('portfolio'); }
+    if (oldCash) { localStorage.setItem('pf_cash_預設', oldCash); localStorage.removeItem('pfCash'); }
+  }
+})();
+
 let pfUsers    = JSON.parse(localStorage.getItem('pfUsers') || '["預設"]');
 let pfCurUser  = localStorage.getItem('pfCurUser') || pfUsers[0];
 if (!pfUsers.includes(pfCurUser)) pfCurUser = pfUsers[0];
@@ -2405,7 +2421,7 @@ function renderHeatmapHtml(sym, data) {
     const vals = avgByMonth[m] || [];
     const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
     const txt = avg != null ? (avg >= 0 ? '+' : '') + avg.toFixed(1) + '%' : '-';
-    return `<td style="font-size:9px;font-weight:700;padding:5px 4px;text-align:center;color:${avg == null ? 'var(--txt3)' : avg >= 0 ? 'var(--green)' : 'var(--red)'}">${txt}</td>`;
+    return `<td style="font-size:9px;font-weight:700;padding:5px 4px;text-align:center;color:${avg == null ? 'var(--txt3)' : avg >= 0 ? 'var(--red)' : 'var(--green)'}">${txt}</td>`;
   }).join('');
   const avgRow = `<tr style="border-top:1px solid var(--border)">
     <td style="font-size:9px;font-weight:700;color:var(--txt3);padding:5px 8px">月平均</td>
@@ -2520,11 +2536,11 @@ function pcrLabel(v) {
 }
 function pcrColor(v) {
   if (v == null) return 'var(--txt2)';
-  if (v > 130) return '#9333ea';   /* 深紫 — 極度恐慌 */
-  if (v > 110) return '#c084fc';   /* 中紫 — 偏向恐慌 */
-  if (v > 90)  return 'var(--yellow)'; /* 黃   — 中性     */
-  if (v > 70)  return '#67e8f9';   /* 淡藍 — 偏向樂觀 */
-  return '#22d3ee';                /* 亮青 — 極度樂觀 */
+  if (v > 130) return 'var(--red)';     /* 紅   — 極度恐慌 */
+  if (v > 110) return '#fb923c';        /* 橘   — 偏向恐慌 */
+  if (v > 90)  return 'var(--yellow)';  /* 黃   — 中性     */
+  if (v > 70)  return '#67e8f9';        /* 淡藍 — 偏向樂觀 */
+  return 'var(--green)';                /* 綠   — 極度樂觀 */
 }
 
 function renderValuation(pe, pcr) {
@@ -2679,14 +2695,16 @@ async function init() {
       `<option value="${sym}">${sym}${cfg.names[sym] ? ' — ' + cfg.names[sym] : ''}</option>`
     ).join('');
 
-    // Build heatmap sym selector and load default
-    const hmSel = document.getElementById('hmSym');
-    if (hmSel) {
-      hmSel.innerHTML = ORDER.map(sym =>
-        `<option value="${sym}">${sym}</option>`
+    // Build heatmap datalist and set default
+    const hmList = document.getElementById('hmSymList');
+    if (hmList) {
+      hmList.innerHTML = ORDER.map(sym =>
+        `<option value="${sym}">${sym}${cfg.names[sym] ? ' — ' + cfg.names[sym] : ''}</option>`
       ).join('');
-      loadHeatmap();
     }
+    const hmInput = document.getElementById('hmSym');
+    if (hmInput && !hmInput.value) hmInput.value = TW_ORDER[0] || '0050';
+    loadHeatmap();
   } catch(e) {
     console.error('Config load failed, using fallback', e);
   }
