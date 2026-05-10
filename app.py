@@ -63,6 +63,10 @@ _cache = {
     "vix":         None,
     "foreign_net": None,
     "tw_chips":    None,
+    "taiex_pe":    None,
+    "taiex_pe_ts": 0.0,
+    "pcr":         None,
+    "pcr_ts":      0.0,
 }
 VIX_TTL    = 1800   # 30 min — VIX updates intraday but not per-minute
 CHIPS_TTL  = 7200   # 2 hours — TWSE chips published once daily ~14:30
@@ -70,6 +74,8 @@ USDTWD_TTL = 1800   # 30 min
 FG_TTL     = 3600   # 1 hour — CNN Fear & Greed updates a few times daily
 GLOBAL_TTL = 1800   # 30 min
 SECTOR_TTL = 1800   # 30 min
+PE_TTL     = 3600   # 1 hour — TWSE publishes P/E once per trading day
+PCR_TTL    = 1800   # 30 min — TAIFEX updates intraday
 GLOBAL_SYMBOLS = {
     "^TWII": "台灣加權",
     "^N225": "日經225",
@@ -600,6 +606,73 @@ def _fetch_fear_greed() -> dict | None:
         return None
 
 
+# ─── 大盤本益比 (TAIEX P/E) ──────────────────────────────────────────────────
+def _fetch_taiex_pe() -> dict | None:
+    try:
+        resp = requests.get(
+            "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_d",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        rows = resp.json()
+        pe_vals  = []
+        yld_vals = []
+        pb_vals  = []
+        for row in rows:
+            for key, store in (("PEratio", pe_vals), ("DividendYield", yld_vals), ("PBratio", pb_vals)):
+                try:
+                    v = float(row.get(key, ""))
+                    if v > 0:
+                        store.append(v)
+                except (ValueError, TypeError):
+                    pass
+        # Filter extreme outliers for P/E (loss-making firms skew the mean)
+        pe_vals = [v for v in pe_vals if v < 200]
+        if not pe_vals:
+            return None
+        date_str = rows[0].get("Date", "") if rows else ""
+        return {
+            "date":       date_str,
+            "pe_median":  round(float(np.median(pe_vals)), 2),
+            "yld_median": round(float(np.median(yld_vals)), 2) if yld_vals else None,
+            "pb_median":  round(float(np.median(pb_vals)),  2) if pb_vals  else None,
+            "count":      len(pe_vals),
+        }
+    except Exception as exc:
+        logger.error("TAIEX PE fetch error: %s", exc)
+        return None
+
+
+# ─── 選擇權 Put/Call Ratio (PCR) ──────────────────────────────────────────────
+def _fetch_pcr() -> dict | None:
+    try:
+        resp = requests.get(
+            "https://www.taifex.com.tw/cht/3/pcRatio",
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.taifex.com.tw/"},
+            timeout=15,
+        )
+        for row_html in re.findall(r'<tr[^>]*>(.*?)</tr>', resp.text, re.DOTALL):
+            cells = re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL)
+            cols  = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
+            if len(cols) >= 7 and '/' in (cols[0] if cols else ''):
+                def _n(s):
+                    try: return float(s.replace(',', ''))
+                    except: return None
+                return {
+                    "date":     cols[0],
+                    "put_vol":  _n(cols[1]),
+                    "call_vol": _n(cols[2]),
+                    "vol_pcr":  _n(cols[3]),
+                    "put_oi":   _n(cols[4]),
+                    "call_oi":  _n(cols[5]),
+                    "oi_pcr":   _n(cols[6]),
+                }
+        return None
+    except Exception as exc:
+        logger.error("PCR fetch error: %s", exc)
+        return None
+
+
 # ─── 配息資料 ─────────────────────────────────────────────────────────────────
 def _fetch_yahoo_dividends(ticker: str) -> list[dict]:
     try:
@@ -1071,18 +1144,25 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
                 pool.submit(_fetch_usdtwd):        "usdtwd",
                 pool.submit(_fetch_fear_greed):    "fear_greed",
                 pool.submit(_fetch_global_quotes): "global_quotes",
+                pool.submit(_fetch_taiex_pe):      "taiex_pe",
+                pool.submit(_fetch_pcr):           "pcr",
             }
             for fut in as_completed(tw_futs + yf_futs):
                 name, hist = fut.result()
                 if hist is not None:
                     _cache["histories"][name] = hist
+            now_t = time.time()
             for fut, key in misc_futs.items():
                 val = fut.result()
                 if val:
                     if key == "chips":
-                        _cache["tw_chips"] = val; _cache["chips_ts"] = time.time()
+                        _cache["tw_chips"] = val; _cache["chips_ts"] = now_t
                     elif key == "global_quotes":
-                        _cache["global_quotes"] = val; _cache["global_quotes_ts"] = time.time()
+                        _cache["global_quotes"] = val; _cache["global_quotes_ts"] = now_t
+                    elif key == "taiex_pe":
+                        _cache["taiex_pe"] = val; _cache["taiex_pe_ts"] = now_t
+                    elif key == "pcr":
+                        _cache["pcr"] = val; _cache["pcr_ts"] = now_t
                     else:
                         _cache[key] = val
 
@@ -1121,10 +1201,12 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
         do_usd    = now_t - _cache["usdtwd_ts"]        > USDTWD_TTL
         do_fg     = now_t - _cache["fear_greed_ts"]    > FG_TTL
         do_global = now_t - _cache["global_quotes_ts"] > GLOBAL_TTL
+        do_pe     = now_t - _cache["taiex_pe_ts"]      > PE_TTL
+        do_pcr    = now_t - _cache["pcr_ts"]           > PCR_TTL
 
         # Phase 1: bulk TWSE quote, then all non-TD entries + optional misc in parallel
         tw_quotes = _fetch_tw_quotes()
-        with ThreadPoolExecutor(max_workers=12) as pool:
+        with ThreadPoolExecutor(max_workers=14) as pool:
             entry_futs = (
                 [pool.submit(_tw_entry, n, s, tw_quotes) for n, s in TW_SYMBOLS.items()] +
                 [pool.submit(_yf_entry, n, t)            for n, t in YF_US_SYMBOLS.items()]
@@ -1135,6 +1217,8 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
             if do_usd:    misc_futs[pool.submit(_fetch_usdtwd)]        = "usdtwd"
             if do_fg:     misc_futs[pool.submit(_fetch_fear_greed)]    = "fear_greed"
             if do_global: misc_futs[pool.submit(_fetch_global_quotes)] = "global_quotes"
+            if do_pe:     misc_futs[pool.submit(_fetch_taiex_pe)]      = "taiex_pe"
+            if do_pcr:    misc_futs[pool.submit(_fetch_pcr)]           = "pcr"
 
             for fut in as_completed(entry_futs):
                 name, entry = fut.result()
@@ -1153,6 +1237,10 @@ def _do_refresh(refresh_hist: bool, refresh_price: bool):
                         _cache["usdtwd"] = val; _cache["usdtwd_ts"] = now_t
                     elif key == "fear_greed":
                         _cache["fear_greed"] = val; _cache["fear_greed_ts"] = now_t
+                    elif key == "taiex_pe":
+                        _cache["taiex_pe"] = val; _cache["taiex_pe_ts"] = now_t
+                    elif key == "pcr":
+                        _cache["pcr"] = val; _cache["pcr_ts"] = now_t
 
         # Phase 2: TD quotes (rate-limited, must stay sequential)
         logger.info("Refreshing US prices (Twelve Data)…")
@@ -1471,6 +1559,8 @@ def api_dashboard():
             "usdtwd":        _cache.get("usdtwd"),
             "fear_greed":    _cache.get("fear_greed"),
             "global_quotes": _cache.get("global_quotes", {}),
+            "taiex_pe":      _cache.get("taiex_pe"),
+            "pcr":           _cache.get("pcr"),
         })
     except Exception as exc:
         logger.exception("Dashboard error")

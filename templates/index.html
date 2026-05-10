@@ -897,6 +897,20 @@ button { cursor: pointer; font-family: inherit; }
     </div>
   </div>
 
+  <!-- 市場估值 Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">市場估值</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">大盤本益比 · 選擇權 Put/Call Ratio</span>
+      </div>
+      <span id="peDate" style="font-size:10px;color:var(--txt3)"></span>
+    </div>
+    <div class="panel-body" id="valuationPanel">
+      <div class="sk"><div class="spin"></div></div>
+    </div>
+  </div>
+
   <!-- Bottom row -->
   <div class="bottom-row">
 
@@ -1094,6 +1108,7 @@ function render() {
   renderSmile(state.sop);
   renderChart(curSym);
   renderMarketSentiment(state.vix, state.foreign_net, state.fear_greed);
+  renderValuation(state.taiex_pe, state.pcr);
   renderCashBot(cbBasePct);
   renderChips(state.tw_chips);
   renderPortfolio();
@@ -2222,6 +2237,120 @@ function renderSectorTable() {
     </table>
   </div>
   <div style="font-size:9px;color:var(--txt3);margin-top:8px">排序依據：${colLabel}　資料每 30 分鐘更新</div>`;
+}
+
+/* ─── Valuation (P/E + PCR) ───────────────────────────────────────────────── */
+function peLabel(v) {
+  if (v < 12) return { text: '歷史低估', cls: 'neg' };
+  if (v < 16) return { text: '合理',     cls: 'neu' };
+  if (v < 20) return { text: '偏高',     cls: 'pos' };
+  return              { text: '高估',     cls: 'pos' };
+}
+function peBarColor(v) {
+  if (v < 12) return 'var(--green)';
+  if (v < 16) return 'var(--cyan)';
+  if (v < 20) return 'var(--yellow)';
+  return 'var(--red)';
+}
+function pcrLabel(v) {
+  if (v == null) return '-';
+  if (v > 130) return { text: '極度恐慌', cls: 'neg' };
+  if (v > 110) return { text: '偏向恐慌', cls: 'neg' };
+  if (v > 90)  return { text: '中性',     cls: 'neu' };
+  if (v > 70)  return { text: '偏向樂觀', cls: 'pos' };
+  return              { text: '極度樂觀', cls: 'pos' };
+}
+function pcrColor(v) {
+  if (v == null) return 'var(--txt2)';
+  if (v > 130) return 'var(--green)';
+  if (v > 110) return '#86efac';
+  if (v > 90)  return 'var(--yellow)';
+  if (v > 70)  return '#fb923c';
+  return 'var(--red)';
+}
+
+function renderValuation(pe, pcr) {
+  const el = document.getElementById('valuationPanel');
+  if (!el) return;
+  if (!pe && !pcr) { el.innerHTML = '<div class="empty-box">市場估值資料載入中…</div>'; return; }
+
+  /* P/E section */
+  let peHtml = '';
+  if (pe) {
+    const v   = pe.pe_median;
+    const lbl = peLabel(v);
+    const pct = Math.min(Math.max((v - 8) / (26 - 8) * 100, 0), 100).toFixed(1);
+    if (pe.date) {
+      const el2 = document.getElementById('peDate');
+      if (el2) el2.textContent = pe.date;
+    }
+    peHtml = `
+    <div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;font-weight:600;letter-spacing:.3px">大盤本益比 (TAIEX 中位數)</div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:700;color:${peBarColor(v)}">${f(v, 1)}x</span>
+        <span style="font-size:11px;font-weight:700;color:${peBarColor(v)}">${lbl.text}</span>
+      </div>
+      <div style="position:relative;height:6px;background:var(--bg3);border-radius:3px;margin-bottom:6px;overflow:hidden">
+        <div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;background:${peBarColor(v)};border-radius:3px;transition:width .4s"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--txt3);margin-bottom:12px">
+        <span>8 低估</span><span>12</span><span>16 合理</span><span>20</span><span>26 高估</span>
+      </div>
+      <div class="scard-metrics">
+        ${pe.yld_median != null ? `<div class="metric-row">
+          <span class="metric-lbl">殖利率中位數</span>
+          <span class="metric-val" style="color:var(--cyan)">${f(pe.yld_median, 2)}%</span>
+        </div>` : ''}
+        ${pe.pb_median != null ? `<div class="metric-row">
+          <span class="metric-lbl">股價淨值比中位數</span>
+          <span class="metric-val">${f(pe.pb_median, 2)}</span>
+        </div>` : ''}
+        <div class="metric-row">
+          <span class="metric-lbl">有效樣本</span>
+          <span class="metric-val" style="color:var(--txt3)">${pe.count} 支</span>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:9px;color:var(--txt3);line-height:1.8;padding:8px;background:var(--bg3);border-radius:6px">
+        P/E &lt; 12：市場相對低估，長線布局佳機<br>
+        P/E 16–20：合理偏高，新資金可分批進場<br>
+        P/E &gt; 20：歷史高估區，謹慎追高
+      </div>
+    </div>`;
+  }
+
+  /* PCR section */
+  let pcrHtml = '';
+  if (pcr) {
+    const vl = pcrLabel(pcr.vol_pcr);
+    const ol = pcrLabel(pcr.oi_pcr);
+    pcrHtml = `
+    <div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px;font-weight:600;letter-spacing:.3px">選擇權 Put/Call Ratio（TAIFEX）</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div style="text-align:center;background:var(--bg3);border-radius:8px;padding:12px 8px">
+          <div style="font-size:9px;color:var(--txt3);margin-bottom:6px;font-weight:600">成交量 PCR</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:${pcrColor(pcr.vol_pcr)}">${pcr.vol_pcr != null ? pcr.vol_pcr.toFixed(1) : '-'}%</div>
+          <div style="font-size:9px;font-weight:700;color:${pcrColor(pcr.vol_pcr)};margin-top:4px">${vl.text}</div>
+          <div style="font-size:9px;color:var(--txt3);margin-top:4px">P ${pcr.put_vol != null ? (pcr.put_vol/1e4).toFixed(0)+'萬' : '-'} / C ${pcr.call_vol != null ? (pcr.call_vol/1e4).toFixed(0)+'萬' : '-'}</div>
+        </div>
+        <div style="text-align:center;background:var(--bg3);border-radius:8px;padding:12px 8px">
+          <div style="font-size:9px;color:var(--txt3);margin-bottom:6px;font-weight:600">未平倉 PCR</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:${pcrColor(pcr.oi_pcr)}">${pcr.oi_pcr != null ? pcr.oi_pcr.toFixed(1) : '-'}%</div>
+          <div style="font-size:9px;font-weight:700;color:${pcrColor(pcr.oi_pcr)};margin-top:4px">${ol.text}</div>
+          <div style="font-size:9px;color:var(--txt3);margin-top:4px">P ${pcr.put_oi != null ? (pcr.put_oi/1e4).toFixed(1)+'萬' : '-'} / C ${pcr.call_oi != null ? (pcr.call_oi/1e4).toFixed(1)+'萬' : '-'}</div>
+        </div>
+      </div>
+      <div style="font-size:9px;color:var(--txt3);line-height:1.8;padding:8px;background:var(--bg3);border-radius:6px">
+        PCR &gt; 130%：Put &gt;&gt; Call，市場極度恐慌 → 歷史常見底部反轉前兆<br>
+        PCR 90–110%：中性，多空均衡<br>
+        PCR &lt; 80%：Call &gt;&gt; Put，市場過度樂觀 → 留意頭部風險<br>
+        <span style="color:var(--txt2)">日期：${pcr.date}</span>
+      </div>
+    </div>`;
+  }
+
+  el.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">${peHtml}${pcrHtml}</div>`;
 }
 
 /* ─── Settings ────────────────────────────────────────────────────────────── */
