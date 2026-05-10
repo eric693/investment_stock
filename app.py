@@ -30,35 +30,18 @@ HIST_TTL  = int(os.environ.get("HIST_CACHE_SECONDS",  "43200"))
 TD_BASE = "https://api.twelvedata.com"
 AV_BASE = "https://www.alphavantage.co/query"
 
-TW_SYMBOLS = {
-    "0050":   "0050.TW",
-    "00631L": "00631L.TW",
-    "00662":  "00662.TW",
-    "00865B": "00865B.TW",
-}
-US_SYMBOLS = {
-    "QQQ": ("QQQ", "NASDAQ"),
-    "QLD": ("QLD", ""),
-}
-# Yahoo Finance-only US stocks (no Twelve Data quota needed)
-YF_US_SYMBOLS = {
-    "GOOG": "GOOG",
-    "NVDA": "NVDA",
-    "TSLA": "TSLA",
-    "MSTR": "MSTR",
-}
-SYMBOL_NAMES = {
-    "0050":   "元大台灣50",
-    "QQQ":    "Invesco QQQ ETF",
-    "00631L": "元大台灣50正2",
-    "QLD":    "ProShares Ultra QQQ",
-    "00662":  "富邦NASDAQ",
-    "00865B": "國泰US短期公債",
-    "GOOG":   "Alphabet (Google)",
-    "NVDA":   "NVIDIA",
-    "TSLA":   "Tesla",
-    "MSTR":   "MicroStrategy",
-}
+_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "stocks_config.json")
+
+def _load_stocks_config():
+    with open(_CONFIG_FILE, encoding="utf-8") as f:
+        cfg = json.load(f)
+    tw_symbols    = cfg["tw_symbols"]
+    us_symbols    = {k: (v["symbol"], v["exchange"]) for k, v in cfg["us_td_symbols"].items()}
+    us_yf_symbols = cfg["us_yf_symbols"]
+    names         = cfg["names"]
+    return tw_symbols, us_symbols, us_yf_symbols, names
+
+TW_SYMBOLS, US_SYMBOLS, YF_US_SYMBOLS, SYMBOL_NAMES = _load_stocks_config()
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
 _cache = {

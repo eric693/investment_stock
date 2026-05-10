@@ -1,0 +1,30 @@
+{
+  "tw_symbols": {
+    "0050":   "0050.TW",
+    "00631L": "00631L.TW",
+    "00662":  "00662.TW",
+    "00865B": "00865B.TW"
+  },
+  "us_td_symbols": {
+    "QQQ": { "symbol": "QQQ", "exchange": "NASDAQ" },
+    "QLD": { "symbol": "QLD", "exchange": "" }
+  },
+  "us_yf_symbols": {
+    "GOOG": "GOOG",
+    "NVDA": "NVDA",
+    "TSLA": "TSLA",
+    "MSTR": "MSTR"
+  },
+  "names": {
+    "0050":   "元大台灣50",
+    "QQQ":    "Invesco QQQ ETF",
+    "00631L": "元大台灣50正2",
+    "QLD":    "ProShares Ultra QQQ",
+    "00662":  "富邦NASDAQ",
+    "00865B": "國泰US短期公債",
+    "GOOG":   "Alphabet (Google)",
+    "NVDA":   "NVIDIA",
+    "TSLA":   "Tesla",
+    "MSTR":   "MicroStrategy"
+  }
+}
