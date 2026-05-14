@@ -671,8 +671,8 @@ button { cursor: pointer; font-family: inherit; }
             <input id="chartSearchSym" class="dca-input" list="chartSymList"
                    style="width:110px;text-transform:uppercase" placeholder="代號搜尋"
                    autocomplete="off" spellcheck="false"
-                   onkeydown="if(event.key==='Enter')searchChart()">
-            <button class="btn btn-ghost" onclick="searchChart()" style="padding:4px 10px;font-size:11px">查詢</button>
+                   onkeydown="if(event.key==='Enter')runChartSearch()">
+            <button class="btn btn-ghost" onclick="runChartSearch()" style="padding:4px 10px;font-size:11px">查詢</button>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1430,7 +1430,7 @@ function switchChart(btn, sym) {
   renderChart(sym);
 }
 
-async function searchChart() {
+async function runChartSearch() {
   const raw = (document.getElementById('chartSearchSym').value || '').trim().toUpperCase();
   if (!raw) return;
   const statusEl = document.getElementById('chartSearchStatus');
