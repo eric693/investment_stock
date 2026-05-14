@@ -863,98 +863,6 @@ def _fetch_global_quotes() -> dict:
     return result
 
 
-# ─── SOP 回測 ────────────────────────────────────────────────────────────────
-def _run_sop_backtest(hist: pd.DataFrame, capital: float,
-                      start_str: str = "", end_str: str = "") -> dict:
-    df = hist[["Close", "MA200"]].copy().dropna(subset=["MA200"])
-    if re.match(r"^\d{4}-\d{2}$", start_str):
-        df = df[df.index >= pd.Timestamp(f"{start_str}-01")]
-    if re.match(r"^\d{4}-\d{2}$", end_str):
-        df = df[df.index <= pd.Timestamp(f"{end_str}-01") + pd.offsets.MonthEnd(1)]
-    if len(df) < 30:
-        return {"error": "歷史資料不足（需至少 30 個交易日含 MA200）"}
-    df["daily_chg"] = df["Close"].pct_change() * 100
-    df["vs_ma200"]  = (df["Close"] - df["MA200"]) / df["MA200"] * 100
-
-    cash        = capital * 0.20
-    shares      = (capital * 0.80) / float(df["Close"].iloc[0])
-    events      = []
-    pv_list     = []
-    below3_n    = 0
-    above3_n    = 0
-    bought_lvls: set = set()   # smile levels bought in current holding period
-    SMILE_THRS  = [-8, -10, -15, -20, -25, -30]
-
-    for i, (date_idx, row) in enumerate(df.iterrows()):
-        price  = float(row["Close"])
-        vs_ma  = float(row["vs_ma200"]) if pd.notna(row["vs_ma200"]) else 0
-        d_chg  = float(row["daily_chg"]) if i > 0 and pd.notna(row["daily_chg"]) else 0
-        date_s = date_idx.strftime("%Y-%m-%d")
-        exited_today = False
-
-        below3_n = below3_n + 1 if vs_ma < -3 else 0
-        above3_n = above3_n + 1 if vs_ma >  3 else 0
-
-        # SOP03: retreat
-        if shares > 0 and (d_chg <= -5 or below3_n >= 3):
-            cash += shares * price
-            events.append({
-                "date": date_s, "type": "SELL", "price": round(price, 2),
-                "desc": f"SOP03 {'單日暴跌' + str(round(d_chg,1)) + '%' if d_chg <= -5 else '連3日跌破年線-3%'} → 清倉",
-            })
-            shares = 0; bought_lvls = set(); exited_today = True
-
-        # SOP04: smile buying levels
-        for j, thr in enumerate(SMILE_THRS):
-            if vs_ma <= thr and (j == len(SMILE_THRS) - 1 or vs_ma > SMILE_THRS[j + 1]):
-                if thr not in bought_lvls and cash >= capital * 0.03:
-                    bought_lvls.add(thr)
-                    amt = min(cash * 0.05, cash)
-                    shares += amt / price; cash -= amt
-                    events.append({
-                        "date": date_s, "type": "BUY", "price": round(price, 2),
-                        "desc": f"SOP04 微笑佈局 年線{thr}% → 加碼 5% 資金",
-                    })
-                break
-
-        # SOP05: recovery
-        if not exited_today and shares == 0 and above3_n >= 3 and cash > 0:
-            new_sh = (cash * 0.90) / price
-            events.append({
-                "date": date_s, "type": "BUY", "price": round(price, 2),
-                "desc": f"SOP05 反攻號角連3日 → 重倉進場 90% 資金",
-            })
-            shares = new_sh; cash *= 0.10; bought_lvls = set()
-
-        pv_list.append({"d": date_s, "v": round(shares * price + cash)})
-
-    final_price = float(df["Close"].iloc[-1])
-    final_val   = shares * final_price + cash
-    ret_pct     = (final_val - capital) / capital * 100
-    days        = max((df.index[-1] - df.index[0]).days, 1)
-    cagr        = ((final_val / capital) ** (365.0 / days) - 1) * 100
-
-    bnh_sh   = (capital * 0.80) / float(df["Close"].iloc[0])
-    bnh_val  = bnh_sh * final_price + capital * 0.20
-    bnh_ret  = (bnh_val - capital) / capital * 100
-    bnh_cagr = ((bnh_val / capital) ** (365.0 / days) - 1) * 100
-
-    return {
-        "capital":     capital,
-        "final_value": round(final_val),
-        "return_pct":  round(ret_pct, 2),
-        "cagr":        round(cagr, 2),
-        "bnh_return":  round(bnh_ret, 2),
-        "bnh_cagr":    round(bnh_cagr, 2),
-        "events":      events,
-        "chart":       pv_list,
-        "start_date":  df.index[0].strftime("%Y-%m-%d"),
-        "end_date":    df.index[-1].strftime("%Y-%m-%d"),
-        "days":        days,
-        "trades":      len(events),
-    }
-
-
 # ─── 台股籌碼：三大法人 + 融資融券 ───────────────────────────────────────────────
 def _fetch_tw_chips() -> dict | None:
     """Fetch per-stock 三大法人 (T86) and 融資融券 (MI_MARGN) for TW ETFs."""
@@ -1766,20 +1674,6 @@ def _resolve_hist(sym: str) -> pd.DataFrame | None:
         _search_cache[ticker] = cached
     return hist
 
-
-@app.route("/api/backtest")
-def api_backtest():
-    sym = request.args.get("sym", "0050").upper()
-    try:
-        capital = float(request.args.get("capital", "1000000"))
-    except (ValueError, TypeError):
-        capital = 1_000_000
-    start_str = request.args.get("start", "")
-    end_str   = request.args.get("end",   "")
-    hist = _resolve_hist(sym)
-    if hist is None:
-        return jsonify({"error": f"{sym} 歷史資料取得失敗，請確認代號正確"}), 404
-    return jsonify(_run_sop_backtest(hist, capital, start_str, end_str))
 
 
 @app.route("/api/monthly-returns")

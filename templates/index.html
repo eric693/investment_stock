@@ -910,26 +910,6 @@ button { cursor: pointer; font-family: inherit; }
     </div>
   </div>
 
-  <!-- SOP Backtest Panel -->
-  <div class="panel">
-    <div class="panel-header">
-      <div>
-        <span class="panel-title">SOP 策略回測</span>
-        <span style="font-size:10px;color:var(--txt3);margin-left:10px">SOP03/04/05 歷史訊號模擬</span>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input class="dca-input" id="btSym" value="0050" style="width:70px;text-align:center;text-transform:uppercase">
-        <input class="dca-input" id="btCapital" type="number" value="1000000" style="width:110px;text-align:right" placeholder="初始資金">
-        <input class="dca-input dca-month" id="btStart" type="month" style="width:130px" placeholder="起始年月">
-        <input class="dca-input dca-month" id="btEnd"   type="month" style="width:130px" placeholder="結束年月">
-        <button class="btn btn-ghost" onclick="runBacktest()">開始回測</button>
-      </div>
-    </div>
-    <div class="panel-body" id="backtestPanel">
-      <div class="empty-box">輸入參數後點「開始回測」查看歷史訊號模擬結果</div>
-    </div>
-  </div>
-
   <!-- 存股配息模擬 Panel -->
   <div class="panel">
     <div class="panel-header">
@@ -2260,61 +2240,6 @@ async function calcDca() {
   }
 }
 
-/* ─── SOP Backtest ──────────────────────────────────────────────────────── */
-async function runBacktest() {
-  const sym     = (document.getElementById('btSym').value || '0050').trim().toUpperCase();
-  const capital = parseFloat(document.getElementById('btCapital').value) || 1000000;
-  const btStart = document.getElementById('btStart').value;
-  const btEnd   = document.getElementById('btEnd').value;
-  const el      = document.getElementById('backtestPanel');
-  el.innerHTML  = '<div class="sk" style="padding:20px"><div class="spin"></div></div>';
-  try {
-    const r = await fetch(`/api/backtest?sym=${encodeURIComponent(sym)}&capital=${capital}${btStart?'&start='+encodeURIComponent(btStart):''}${btEnd?'&end='+encodeURIComponent(btEnd):''}`);
-    const d = await r.json();
-    if (d.error) { el.innerHTML = `<div class="empty-box" style="color:var(--red)">${d.error}</div>`; return; }
-    const isTw  = TW_STOCKS.has(sym);
-    const curr  = isTw ? 'NT$' : 'USD ';
-    const beats = d.return_pct >= d.bnh_return;
-    const evHtml = d.events.length
-      ? [...d.events].reverse().map(ev => `
-        <div class="bt-ev-row">
-          <span class="bt-ev-date">${ev.date}</span>
-          <div class="${ev.type==='SELL'?'bt-dot-s':'bt-dot-b'}"></div>
-          <span style="color:var(--txt2);flex:1">${ev.desc}</span>
-          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--txt3)">${f(ev.price)}</span>
-        </div>`).join('')
-      : '<div class="empty-box">回測期間未觸發任何訊號</div>';
-    el.innerHTML = `
-      <div class="bt-summary">
-        <div class="bt-card">
-          <div class="bt-card-label">SOP 最終資產</div>
-          <div class="bt-card-val ${cls(d.return_pct)}">${curr}${d.final_value.toLocaleString()}</div>
-          <div style="font-size:10px;margin-top:3px;color:var(--txt3)">${fc(d.return_pct)} / 年化 ${fc(d.cagr)}</div>
-        </div>
-        <div class="bt-card">
-          <div class="bt-card-label">買進持有 (80%)</div>
-          <div class="bt-card-val ${cls(d.bnh_return)}">${fc(d.bnh_return)}</div>
-          <div style="font-size:10px;margin-top:3px;color:var(--txt3)">年化 ${fc(d.bnh_cagr)}</div>
-        </div>
-        <div class="bt-card">
-          <div class="bt-card-label">策略評估</div>
-          <div class="bt-card-val" style="font-size:14px;color:${beats?'var(--red)':'var(--green)'}">${beats?'優於買進持有':'落後買進持有'}</div>
-          <div style="font-size:10px;margin-top:3px;color:var(--txt3)">${d.trades} 筆訊號 · ${d.days} 天</div>
-        </div>
-      </div>
-      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">
-        期間：${d.start_date} ～ ${d.end_date}　初始 ${curr}${(d.capital/10000).toFixed(0)}萬（80% 建倉）
-      </div>
-      <div style="font-size:10px;color:var(--txt3);font-weight:600;letter-spacing:.3px;margin-bottom:6px">訊號紀錄（最新優先）</div>
-      <div class="bt-events">${evHtml}</div>
-      <div style="font-size:9px;color:var(--txt3);margin-top:10px;line-height:1.6;padding:6px 10px;background:var(--bg3);border-radius:6px">
-        ⚠ 回測僅模擬 SOP03/04/05，不含 SOP02 QQQ 雙核雷達。歷史表現不代表未來績效。
-      </div>`;
-  } catch(e) {
-    el.innerHTML = '<div class="empty-box" style="color:var(--red)">請求失敗，請重試</div>';
-  }
-}
-
 /* ─── Dividend Sim ─────────────────────────────────────────────────────────── */
 document.getElementById('divSym').addEventListener('change', function() {
   document.getElementById('divSymCustom').style.display = this.value === 'custom' ? '' : 'none';
@@ -2845,7 +2770,13 @@ async function loadKline() {
 
 function klMaRank(chips) {
   const { ma5, ma20, ma60 } = chips;
-  if (ma5 == null || ma20 == null || ma60 == null) return { text: '-', color: 'var(--txt3)', desc: '' };
+  if (ma5 == null || ma20 == null) return { text: '資料不足', color: 'var(--txt3)', desc: '歷史資料不足，無法計算均線' };
+  if (ma60 == null) {
+    // 1M 只有 ~22 天，MA60 無法計算，僅比較 MA5/MA20
+    if (ma5 > ma20) return { text: 'MA5 > MA20（短線偏強）', color: 'var(--red)',   desc: `MA5(${ma5}) > MA20(${ma20})，短線動能偏強，MA60 資料不足（切換 3M/6M 查看完整排列）` };
+    if (ma5 < ma20) return { text: 'MA5 < MA20（短線偏弱）', color: 'var(--green)', desc: `MA5(${ma5}) < MA20(${ma20})，短線動能偏弱，MA60 資料不足（切換 3M/6M 查看完整排列）` };
+    return { text: 'MA5 ≈ MA20', color: 'var(--yellow)', desc: 'MA5 與 MA20 相近，趨勢待確認' };
+  }
   if (ma5 > ma20 && ma20 > ma60) return {
     text: '多頭完美排列', color: 'var(--red)',
     desc: `MA5(${ma5}) > MA20(${ma20}) > MA60(${ma60}) — 短中長期趨勢全面向上`
@@ -2933,13 +2864,16 @@ function renderKline(d) {
     return dates.map((dt, i) => ({ x: dt, y: arr[i] }));
   }
 
+  // 轉成 ApexCharts candlestick 格式：y: [open, high, low, close]
+  const apexCandles = ohlcv.map(c => ({ x: c.x, y: [c.o, c.h, c.l, c.c] }));
+
   // ── Candlestick + MA + BB ──
   klChart = new ApexCharts(document.getElementById('klChartArea'), {
     series: [
-      { name: 'K線',   type: 'candlestick', data: ohlcv },
-      { name: 'MA5',   type: 'line', data: paired(ma5) },
-      { name: 'MA20',  type: 'line', data: paired(ma20) },
-      { name: 'MA60',  type: 'line', data: paired(ma60) },
+      { name: 'K線',    type: 'candlestick', data: apexCandles },
+      { name: 'MA5',    type: 'line', data: paired(ma5) },
+      { name: 'MA20',   type: 'line', data: paired(ma20) },
+      { name: 'MA60',   type: 'line', data: paired(ma60) },
       { name: 'BB上軌', type: 'line', data: paired(bb_upper) },
       { name: 'BB下軌', type: 'line', data: paired(bb_lower) },
     ],
@@ -2951,6 +2885,7 @@ function renderKline(d) {
     plotOptions: {
       candlestick: { colors: { upward: '#ef4444', downward: '#22c55e' }, wick: { useFillColor: true } },
     },
+    dataLabels: { enabled: false },
     colors: ['transparent', '#f97316', '#a855f7', '#06b6d4', '#eab308', '#eab308'],
     stroke: { width: [1, 1.5, 1.5, 1.5, 1, 1], dashArray: [0, 0, 0, 0, 4, 4], curve: 'smooth' },
     xaxis: {
@@ -2971,14 +2906,15 @@ function renderKline(d) {
   // ── Volume (up/down two-series stacked) ──
   klVolChart = new ApexCharts(document.getElementById('klVolArea'), {
     series: [
-      { name: '上漲量', data: dates.map((dt, i) => ({ x: dt, y: ohlcv[i] && ohlcv[i].c >= ohlcv[i].o ? (volumes[i] || 0) : 0 })) },
-      { name: '下跌量', data: dates.map((dt, i) => ({ x: dt, y: ohlcv[i] && ohlcv[i].c  < ohlcv[i].o ? (volumes[i] || 0) : 0 })) },
+      { name: '上漲量', data: ohlcv.map((c, i) => ({ x: c.x, y: c.c >= c.o ? (volumes[i] || 0) : 0 })) },
+      { name: '下跌量', data: ohlcv.map((c, i) => ({ x: c.x, y: c.c  < c.o ? (volumes[i] || 0) : 0 })) },
     ],
     chart: {
       type: 'bar', height: 80, stacked: true,
       background: 'transparent', toolbar: { show: false },
       animations: { enabled: false }, foreColor: '#55657a',
     },
+    dataLabels: { enabled: false },
     colors: ['#ef4444', '#22c55e'],
     plotOptions: { bar: { columnWidth: '90%' } },
     xaxis: {
