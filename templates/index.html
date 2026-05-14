@@ -226,31 +226,6 @@ button { cursor: pointer; font-family: inherit; }
 .leg-line     { width: 20px; height: 2px; border-radius: 1px; }
 .leg-label    { font-size: 10px; color: var(--txt2); }
 
-/* ─── SOP panel ───────────────────────────────────────────────────────── */
-.sop-stack { display: flex; flex-direction: column; gap: 10px; }
-.sop-item  { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.sop-item-hd {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-}
-.sop-num-title { display: flex; align-items: center; gap: 8px; }
-.sop-num  { font-size: 9px; font-weight: 800; color: var(--txt3); letter-spacing: .5px; }
-.sop-name { font-size: 13px; font-weight: 700; }
-.badge {
-  font-size: 9px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .4px; padding: 2px 7px; border-radius: 10px;
-}
-.badge-normal  { background: var(--green-dim);        color: var(--green);  }
-.badge-watch   { background: var(--yellow-dim);       color: var(--yellow); }
-.badge-alert   { background: var(--red-dim);          color: var(--red);    }
-.badge-active  { background: var(--blue-dim);         color: var(--blue);   }
-.badge-standby { background: rgba(255,255,255,.05);   color: var(--txt3);   }
-
-.sop-item-bd { padding: 10px 14px; }
-.sop-rule { font-size: 10px; color: var(--txt3); margin-bottom: 5px; line-height: 1.4; }
-.sop-val  { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; }
-
 /* ─── Bottom row ──────────────────────────────────────────────────────── */
 .bottom-row {
   display: grid;
@@ -274,29 +249,6 @@ button { cursor: pointer; font-family: inherit; }
 .alert-msg { font-size: 10px; color: var(--txt2); margin-top: 2px; line-height: 1.4; }
 .alert-ts  { font-size: 9px;  color: var(--txt3); margin-top: 3px; font-variant-numeric: tabular-nums; }
 .empty-box { padding: 28px; text-align: center; color: var(--txt3); font-size: 11px; }
-
-/* ─── Smile detail ────────────────────────────────────────────────────── */
-.smile-header { font-size: 11px; color: var(--txt2); margin-bottom: 12px; }
-.smile-grid   { display: flex; flex-direction: column; gap: 6px; }
-.smile-row    { display: flex; align-items: center; gap: 10px; }
-.smile-thr {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px; font-weight: 600;
-  width: 34px; text-align: right; color: var(--txt2);
-}
-.smile-track { flex: 1; height: 5px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
-.smile-fill  { height: 100%; border-radius: 3px; background: var(--border2); transition: background .3s, width .4s; }
-.smile-fill.hit { background: var(--red); }
-.smile-price-lbl {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px; color: var(--txt3); width: 52px;
-}
-.smile-state { font-size: 9px; width: 36px; text-align: right; font-weight: 700; }
-.smile-foot {
-  margin-top: 12px; padding-top: 10px;
-  border-top: 1px solid var(--border);
-  font-size: 10px; color: var(--txt3); line-height: 1.6;
-}
 
 /* ─── Chip panel ─────────────────────────────────────────────────────── */
 .chip-table { width:100%; border-collapse:collapse; font-size:11px; }
@@ -761,11 +713,8 @@ button { cursor: pointer; font-family: inherit; }
     <div class="sk"><div class="spin"></div></div>
   </div>
 
-  <!-- Chart + SOP -->
-  <div class="content-row">
-
-    <!-- Chart panel -->
-    <div class="panel" style="display:flex;flex-direction:column">
+  <!-- Chart -->
+  <div class="panel" style="display:flex;flex-direction:column">
       <div class="panel-header" style="flex-direction:column;align-items:stretch;gap:10px">
         <span class="panel-title">收盤價 &amp; 移動平均線</span>
         <div class="chart-tabs" id="chartTabs"></div>
@@ -786,12 +735,6 @@ button { cursor: pointer; font-family: inherit; }
         </div>
       </div>
     </div>
-
-    <!-- SOP stack -->
-    <div class="sop-stack" id="sopStack">
-      <div class="sk"><div class="spin"></div></div>
-    </div>
-  </div>
 
   <!-- Monthly Return Heatmap -->
   <div class="panel">
@@ -954,16 +897,6 @@ button { cursor: pointer; font-family: inherit; }
       </div>
       <div class="alert-scroll" id="alertList">
         <div class="empty-box">目前無觸發紀錄</div>
-      </div>
-    </div>
-
-    <!-- Smile layout -->
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">微笑佈局 — 0050 買點位置</span>
-      </div>
-      <div class="panel-body" id="smileDetail">
-        <div class="sk"><div class="spin"></div></div>
       </div>
     </div>
 
@@ -1180,9 +1113,7 @@ function render() {
   renderUsdTwd(state.usdtwd);
   renderGlobalMarkets(state.global_quotes);
   renderStockGrid(state.stocks);
-  renderSOP(state.sop);
   renderAlerts(state.alerts, state.alert_history);
-  renderSmile(state.sop);
   renderChart(curSym);
   renderMarketSentiment(state.vix, state.foreign_net, state.fear_greed);
   renderValuation(state.taiex_pe, state.pcr);
@@ -1349,43 +1280,6 @@ function renderStockGrid(stocks) {
 }
 
 
-/* ── SOP panel ── */
-const STATUS_LABEL = {normal:'正常', watch:'留意', alert:'警報', active:'啟動', standby:'待命'};
-const STATUS_CLS   = {normal:'badge-normal', watch:'badge-watch', alert:'badge-alert', active:'badge-active', standby:'badge-standby'};
-
-function sopValueClass(key, sop) {
-  if (key==='sop02') return cls(sop.qqq_pct);
-  if (key==='sop03') return cls(sop.daily_change);
-  if (key==='sop04' || key==='sop05') return cls(sop.pct_from_ma);
-  return 'neu';
-}
-
-function renderSOP(sop) {
-  if (!sop) {
-    document.getElementById('sopStack').innerHTML =
-      '<div class="empty-box" style="padding:32px;font-size:12px">等待 0050 資料載入，SOP 計算暫停…</div>';
-    return;
-  }
-  const keys = ['sop01','sop02','sop03','sop04','sop05'];
-  document.getElementById('sopStack').innerHTML = keys.map((k,i) => {
-    const s = sop[k]; if (!s) return '';
-    const vc = sopValueClass(k, s);
-    return `
-    <div class="sop-item">
-      <div class="sop-item-hd">
-        <div class="sop-num-title">
-          <span class="sop-num">0${i+1}</span>
-          <span class="sop-name">${s.name}</span>
-        </div>
-        <span class="badge ${STATUS_CLS[s.status]}">${STATUS_LABEL[s.status]||s.status}</span>
-      </div>
-      <div class="sop-item-bd">
-        <div class="sop-rule">${s.desc_rule}</div>
-        <div class="sop-val ${vc}">${s.desc_val}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
 
 /* ── Alert list ── */
 function renderAlerts(cur, hist) {
@@ -1415,33 +1309,6 @@ function renderAlerts(cur, hist) {
       </div>
     </div>`;
   }).join('');
-}
-
-/* ── Smile detail ── */
-function renderSmile(sop) {
-  const s04 = sop?.sop04;
-  if (!s04?.smile_levels) return;
-
-  const p = s04.pct_from_ma;
-  document.getElementById('smileDetail').innerHTML = `
-    <div class="smile-header">
-      目前 0050 偏離年線：<strong class="${cls(p)}">${fc(p)}</strong>
-    </div>
-    <div class="smile-grid">
-      ${s04.smile_levels.map(l => `
-        <div class="smile-row">
-          <span class="smile-thr ${l.triggered?'pos':'neu'}">${l.threshold}%</span>
-          <div class="smile-track">
-            <div class="smile-fill ${l.triggered?'hit':''}" style="width:${l.triggered?'100':'0'}%"></div>
-          </div>
-          <span class="smile-price-lbl">${l.price>0?f(l.price,2):'-'}</span>
-          <span class="smile-state" style="color:${l.triggered?'var(--red)':'var(--txt3)'}">${l.triggered?'觸及':'未達'}</span>
-        </div>`).join('')}
-    </div>
-    <div class="smile-foot">
-      左側各 5% 買入 &nbsp;|&nbsp; 右側（反彈後）各 2% 買入<br>
-      跌破 -30% 進入冬眠，停止加碼
-    </div>`;
 }
 
 /* ── Market Sentiment ── */

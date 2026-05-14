@@ -1103,110 +1103,6 @@ def cached_data() -> dict:
     return _cache["stocks"]
 
 
-# ─── SOP logic ────────────────────────────────────────────────────────────────
-def compute_sop(stocks: dict) -> dict | None:
-    tw  = stocks.get("0050")
-    qqq = stocks.get("QQQ",  {})
-    if not tw:
-        return None   # caller renders "等待 0050 資料" instead of fake 正常
-
-    p0050 = tw.get("pct_from_ma200") or 0.0
-    pqqq  = qqq.get("pct_from_ma200") or 0.0
-    d0050 = tw.get("daily_change") or 0.0
-    l3    = tw.get("last3_vs_ma", [])
-    above = tw.get("above_ma200", True)
-    ma200 = tw.get("ma200") or 0.0
-    price = tw.get("price") or 0.0
-
-    rsi        = tw.get("rsi")
-    macd_cross = tw.get("macd_cross")
-    macd_trend = tw.get("macd_trend")
-    k_val      = tw.get("k_val")
-    d_val      = tw.get("d_val")
-    div        = tw.get("divergence") or {}
-    bearish_div = div.get("bearish", False)
-    bullish_div = div.get("bullish", False)
-
-    smile_levels = []
-    for t in [-8, -10, -15, -20, -25, -30]:
-        tp = ma200 * (1 + t / 100) if ma200 else 0
-        smile_levels.append({
-            "threshold": t,
-            "price":     round(tp, 2),
-            "triggered": price <= tp if tp else False,
-        })
-
-    def s02():
-        if pqqq <= -10: return "alert"
-        if pqqq <= -5:  return "watch"
-        return "normal"
-
-    def s03():
-        if (len(l3) >= 3 and all(p <= -3 for p in l3)) or d0050 <= -5:
-            return "alert"
-        # MACD 死叉 or 空頭趨勢 加入 watch 條件
-        if p0050 <= -3 or macd_cross == "dead" or (macd_trend == "bear" and not above):
-            return "watch"
-        return "normal"
-
-    def s04():
-        return "active" if not above else "standby"
-
-    def s05():
-        strong = (len(l3) >= 3 and all(p >= 3 for p in l3)) or d0050 >= 5
-        if strong and bearish_div:
-            return "watch"   # 頂部背離降級：暫緩全力壓正2
-        if strong:
-            return "alert"
-        if p0050 >= 3 and above:
-            return "watch"
-        return "standby"
-
-    rsi_txt  = f"RSI {rsi:.0f}" if rsi is not None else "RSI -"
-    kd_txt   = f"K {k_val:.0f}/D {d_val:.0f}" if k_val is not None else "KD -"
-    macd_txt = {"golden": "金叉↑", "dead": "死叉↓"}.get(
-        macd_cross or "", "多頭" if macd_trend == "bull" else "空頭" if macd_trend == "bear" else "-"
-    )
-    # 背離標記（SOP desc 用）
-    div04_txt = "　底部背離✓" if bullish_div else ""
-    div05_txt = "　⚠頂部背離" if bearish_div else ""
-
-    return {
-        "sop01": {
-            "name": "建軍配置", "status": "active",
-            "desc_rule": "40% 原型 + 40% 正2 + 20% 現金，每年底再平衡",
-            "desc_val":  "每年底若線下已出清正2，則不需再平衡",
-        },
-        "sop02": {
-            "name": "雙核雷達", "status": s02(),
-            "qqq_pct":    round(pqqq, 2),
-            "tw50_above": above,
-            "desc_rule": "台股看0050年線；QQQ跌破年線-10% → 正2強制清倉",
-            "desc_val":  f"QQQ 年線偏離：{pqqq:+.2f}%",
-        },
-        "sop03": {
-            "name": "撤退機制", "status": s03(),
-            "daily_change": round(d0050, 2),
-            "last3":        l3,
-            "desc_rule": "跌破年線-3%連3天，或單日-5% → 出清正2轉備戰現金",
-            "desc_val":  f"0050 日漲跌：{d0050:+.2f}%　MACD {macd_txt}",
-        },
-        "sop04": {
-            "name": "微笑佈局", "status": s04(),
-            "pct_from_ma":  round(p0050, 2),
-            "smile_levels": smile_levels,
-            "desc_rule": "線下只買原型；左側各5%，右側各2%；-30%冬眠",
-            "desc_val":  f"年線偏離：{p0050:+.2f}%　{rsi_txt}　{kd_txt}{div04_txt}",
-        },
-        "sop05": {
-            "name": "反攻號角", "status": s05(),
-            "pct_from_ma":  round(p0050, 2),
-            "daily_change": round(d0050, 2),
-            "desc_rule": "站回年線+3%連3天 或 單日+5% → 全數壓正2",
-            "desc_val":  f"年線偏離：{p0050:+.2f}%　MACD {macd_txt}　{rsi_txt}{div05_txt}",
-        },
-    }
-
 
 def check_alerts(stocks: dict, sop: dict | None) -> list[dict]:
     if not sop:
@@ -1340,8 +1236,7 @@ def index():
 def api_dashboard():
     try:
         stocks = cached_data()
-        sop    = compute_sop(stocks)
-        alerts = check_alerts(stocks, sop)
+        alerts = check_alerts(stocks, None)
 
         new_alerts = False
         for a in alerts:
@@ -1360,7 +1255,6 @@ def api_dashboard():
 
         return jsonify({
             "stocks":        stocks,
-            "sop":           sop,
             "alerts":        alerts,
             "alert_history": alert_history[:20],
             "updated_at":    datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S"),
