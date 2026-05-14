@@ -59,8 +59,7 @@ _cache = {
     "fear_greed_ts":    0.0,
     "global_quotes":    {},
     "global_quotes_ts": 0.0,
-    "sector":           [],
-    "sector_ts":        0.0,
+
     "refreshing":  False,
     "vix":         None,
     "foreign_net": None,
@@ -77,7 +76,7 @@ CHIPS_TTL  = 7200   # 2 hours — TWSE chips published once daily ~14:30
 USDTWD_TTL = 1800   # 30 min
 FG_TTL     = 3600   # 1 hour — CNN Fear & Greed updates a few times daily
 GLOBAL_TTL = 1800   # 30 min
-SECTOR_TTL = 1800   # 30 min
+
 PE_TTL     = 3600   # 1 hour — TWSE publishes P/E once per trading day
 PCR_TTL    = 1800   # 30 min — TAIFEX updates intraday
 GLOBAL_SYMBOLS = {
@@ -87,16 +86,7 @@ GLOBAL_SYMBOLS = {
     "^IXIC": "那斯達克",
     "SOXX":  "費半ETF",
 }
-SECTOR_SYMBOLS = {
-    "0050.TW":   {"name": "台灣大盤",        "group": "TW"},
-    "00670L.TW": {"name": "NASDAQ正2(00670L)","group": "TW"},
-    "00631L.TW": {"name": "台50正2(00631L)",  "group": "TW"},
-    "^GSPC":     {"name": "S&P 500",         "group": "US"},
-    "SOXX":      {"name": "費半(SOXX)",       "group": "US"},
-    "XLK":       {"name": "科技(XLK)",        "group": "US"},
-    "XLF":       {"name": "金融(XLF)",        "group": "US"},
-    "XLE":       {"name": "能源(XLE)",        "group": "US"},
-}
+
 _refresh_lock = threading.Lock()
 _line_users: dict = {}
 
@@ -675,68 +665,6 @@ def _fetch_pcr() -> dict | None:
         logger.error("PCR fetch error: %s", exc)
         return None
 
-
-# ─── 產業輪動 ──────────────────────────────────────────────────────────────────
-def _fetch_sector_perf(ticker: str, name: str, group: str) -> dict | None:
-    try:
-        data = _yahoo_get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
-            {"interval": "1d", "range": "1y"},
-        )
-        result = (data or {}).get("chart", {}).get("result", [])
-        if not result:
-            return None
-        r          = result[0]
-        timestamps = r.get("timestamp", [])
-        closes     = r.get("indicators", {}).get("quote", [{}])[0].get("close", [])
-        valid      = [(pd.Timestamp(ts, unit="s").normalize(), float(c))
-                      for ts, c in zip(timestamps, closes) if c is not None]
-        if len(valid) < 10:
-            return None
-
-        dates, prices = zip(*valid)
-        last = prices[-1]
-
-        def _pct_since(n_days: int) -> float | None:
-            cutoff = dates[-1] - pd.Timedelta(days=n_days)
-            base = next((p for dt, p in zip(dates, prices) if dt <= cutoff), None)
-            return round((last - base) / base * 100, 2) if base else None
-
-        year_start = pd.Timestamp(dates[-1].year, 1, 1)
-        ytd_prices = [p for dt, p in zip(dates, prices) if dt >= year_start]
-        ytd = round((last - ytd_prices[0]) / ytd_prices[0] * 100, 2) if ytd_prices else None
-
-        return {
-            "ticker":   ticker,
-            "name":     name,
-            "group":    group,
-            "price":    round(last, 2),
-            "chg_1w":   _pct_since(7),
-            "chg_1m":   _pct_since(30),
-            "chg_3m":   _pct_since(90),
-            "chg_ytd":  ytd,
-        }
-    except Exception as exc:
-        logger.error("Sector perf error %s: %s", ticker, exc)
-        return None
-
-
-def _fetch_all_sector_perf() -> list:
-    order = list(SECTOR_SYMBOLS.keys())
-    result = []
-    with ThreadPoolExecutor(max_workers=len(SECTOR_SYMBOLS)) as pool:
-        futs = {pool.submit(_fetch_sector_perf, t, m["name"], m["group"]): t
-                for t, m in SECTOR_SYMBOLS.items()}
-        for fut in as_completed(futs):
-            try:
-                v = fut.result()
-                if v:
-                    result.append(v)
-            except Exception as exc:
-                logger.warning("Sector perf error: %s", exc)
-    result.sort(key=lambda x: order.index(x["ticker"]) if x["ticker"] in order else 99)
-    logger.info("Sector rotation fetched: %d symbols", len(result))
-    return result
 
 
 # ─── 全球大盤即時報價 ─────────────────────────────────────────────────────────────
@@ -1399,16 +1327,6 @@ def api_search():
 
 
 
-@app.route("/api/sector-rotation")
-def api_sector_rotation():
-    now = time.time()
-    if not _cache.get("sector") or now - _cache.get("sector_ts", 0) > SECTOR_TTL:
-        data = _fetch_all_sector_perf()
-        if data:
-            _cache["sector"]    = data
-            _cache["sector_ts"] = now
-    return jsonify(_cache.get("sector", []))
-
 
 def _resolve_hist(sym: str) -> pd.DataFrame | None:
     """Return history DataFrame for any symbol, fetching on-demand if needed."""
@@ -1471,78 +1389,6 @@ def api_config():
     })
 
 
-@app.route("/api/dca")
-def api_dca():
-    sym = request.args.get("sym", "0050").upper()
-    try:    monthly = float(request.args.get("monthly", "10000"))
-    except: monthly = 10000.0
-    start_str = request.args.get("start", "")
-    end_str   = request.args.get("end",   "")
-
-    hist = _resolve_hist(sym)
-    if hist is None:
-        return jsonify({"error": f"{sym} 歷史資料取得失敗，請確認代號正確"}), 404
-
-    hist_c = hist.dropna(subset=["Close"])
-    if hist_c.empty:
-        return jsonify({"error": "無有效歷史資料"}), 404
-
-    today = datetime.now(TW_TZ).date()
-    if re.match(r"^\d{4}-\d{2}$", start_str):
-        sy, sm = int(start_str[:4]), int(start_str[5:7])
-    else:
-        sy = today.year - 2; sm = today.month
-
-    if re.match(r"^\d{4}-\d{2}$", end_str):
-        ey, em = int(end_str[:4]), int(end_str[5:7])
-    else:
-        ey, em = today.year, today.month
-
-    rows: list = []
-    total_invested = 0.0
-    total_shares   = 0.0
-    y, m = sy, sm
-
-    while (y < ey) or (y == ey and m <= em):
-        month_data = hist_c[(hist_c.index.year == y) & (hist_c.index.month == m)]
-        if not month_data.empty:
-            price = float(month_data["Close"].iloc[0])
-            bought = monthly / price
-            total_shares   += bought
-            total_invested += monthly
-            rows.append({"ym": f"{y}-{m:02d}", "price": round(price, 2),
-                         "shares": round(bought, 4), "cum_cost": round(total_invested, 0)})
-        m += 1
-        if m > 12: m = 1; y += 1
-
-    if not rows:
-        return jsonify({"error": "指定期間內無資料，請調整起始月份"}), 404
-
-    end_hist = hist_c[hist_c.index <= pd.Timestamp(f"{ey}-{em:02d}-01") + pd.offsets.MonthEnd(1)]
-    current_price = float(end_hist["Close"].iloc[-1]) if not end_hist.empty else float(hist_c["Close"].iloc[-1])
-    current_value = total_shares * current_price
-    profit        = current_value - total_invested
-    ret_pct       = profit / total_invested * 100 if total_invested else 0
-    avg_cost      = total_invested / total_shares  if total_shares   else 0
-
-    span_d = max((date(ey, em, 1) - date(sy, sm, 1)).days, 1)
-    cagr   = ((current_value / total_invested) ** (365.0 / span_d) - 1) * 100 if total_invested else 0
-
-    return jsonify({
-        "sym":            sym,
-        "monthly":        monthly,
-        "start_date":     f"{sy}-{sm:02d}",
-        "end_date":       f"{ey}-{em:02d}",
-        "total_invested": round(total_invested),
-        "total_shares":   round(total_shares, 4),
-        "current_price":  round(current_price, 2),
-        "current_value":  round(current_value),
-        "profit":         round(profit),
-        "return_pct":     round(ret_pct, 2),
-        "cagr":           round(cagr, 2),
-        "avg_cost":       round(avg_cost, 2),
-        "rows":           rows[-24:],
-    })
 
 
 NEWS_TTL = 900   # 15 minutes
