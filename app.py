@@ -4,6 +4,8 @@ import json
 import time
 import logging
 import threading
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date
 from flask import Flask, render_template, jsonify, request
@@ -67,6 +69,8 @@ _cache = {
     "taiex_pe_ts": 0.0,
     "pcr":         None,
     "pcr_ts":      0.0,
+    "news":        None,
+    "news_ts":     0.0,
 }
 VIX_TTL    = 1800   # 30 min — VIX updates intraday but not per-minute
 CHIPS_TTL  = 7200   # 2 hours — TWSE chips published once daily ~14:30
@@ -1887,6 +1891,167 @@ def api_dca():
         "cagr":           round(cagr, 2),
         "avg_cost":       round(avg_cost, 2),
         "rows":           rows[-24:],
+    })
+
+
+NEWS_TTL = 900   # 15 minutes
+
+@app.route("/api/tw-news")
+def api_tw_news():
+    now = time.time()
+    if _cache["news"] and now - _cache["news_ts"] < NEWS_TTL:
+        return jsonify(_cache["news"])
+
+    queries = ["台股", "台灣股市 ETF 投資"]
+    items: list = []
+    seen: set   = set()
+
+    for q in queries:
+        try:
+            resp = requests.get(
+                "https://news.google.com/rss/search",
+                params={"q": q, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            root = ET.fromstring(resp.text)
+            for item in root.iter("item"):
+                title_raw = item.findtext("title", "").strip()
+                link      = item.findtext("link",  "").strip()
+                pub_str   = item.findtext("pubDate", "")
+                src_el    = item.find("source")
+                source    = src_el.text.strip() if src_el is not None and src_el.text else ""
+
+                # Remove " - SourceName" suffix from title
+                if source and title_raw.endswith(f" - {source}"):
+                    title = title_raw[: -len(f" - {source}")].strip()
+                else:
+                    title = re.sub(r"\s*-\s*[^-\n]{2,40}$", "", title_raw).strip() or title_raw
+
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+
+                ts = None
+                try:
+                    ts = int(parsedate_to_datetime(pub_str).timestamp())
+                except Exception:
+                    pass
+
+                items.append({"title": title, "link": link, "source": source, "ts": ts})
+        except Exception as exc:
+            logger.error("News fetch error (%s): %s", q, exc)
+
+    items.sort(key=lambda x: x.get("ts") or 0, reverse=True)
+    result = items[:24]
+
+    _cache["news"]    = result
+    _cache["news_ts"] = now
+    return jsonify(result)
+
+
+@app.route("/api/kline")
+def api_kline():
+    sym    = request.args.get("sym", "0050").upper()
+    period = request.args.get("period", "1m")
+
+    range_map = {"1m": "1mo", "3m": "3mo", "6m": "6mo", "1y": "1y"}
+    yf_range  = range_map.get(period, "1mo")
+
+    is_tw  = bool(re.match(r"^\d", sym))
+    ticker = f"{sym}.TW" if is_tw else sym
+
+    data = _yahoo_get(
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+        {"interval": "1d", "range": yf_range},
+    )
+    if not data:
+        return jsonify({"error": f"無法取得 {sym} 資料"}), 404
+
+    result = data.get("chart", {}).get("result", [])
+    if not result:
+        return jsonify({"error": f"{sym} 查無資料，請確認代號"}), 404
+
+    r          = result[0]
+    timestamps = r.get("timestamp", [])
+    meta       = r.get("meta", {})
+    quote      = r.get("indicators", {}).get("quote", [{}])[0]
+
+    opens  = quote.get("open",   [])
+    highs  = quote.get("high",   [])
+    lows   = quote.get("low",    [])
+    closes = quote.get("close",  [])
+    vols   = quote.get("volume", [])
+
+    rows = []
+    for ts, o, h, lo, c, v in zip(timestamps, opens, highs, lows, closes, vols):
+        if c is None:
+            continue
+        rows.append({
+            "date":   pd.Timestamp(ts, unit="s").strftime("%Y-%m-%d"),
+            "open":   float(o)  if o  is not None else float(c),
+            "high":   float(h)  if h  is not None else float(c),
+            "low":    float(lo) if lo is not None else float(c),
+            "close":  float(c),
+            "volume": int(v)    if v  is not None else 0,
+        })
+
+    if not rows:
+        return jsonify({"error": "無有效資料"}), 404
+
+    df = pd.DataFrame(rows)
+    cl = df["close"]
+
+    df["ma5"]      = cl.rolling(5).mean()
+    df["ma20"]     = cl.rolling(20).mean()
+    df["ma60"]     = cl.rolling(60).mean()
+    std20          = cl.rolling(20).std()
+    df["bb_upper"] = df["ma20"] + 2 * std20
+    df["bb_lower"] = df["ma20"] - 2 * std20
+    df["rsi"]      = _calc_rsi(cl)
+
+    def nv(v):
+        return round(float(v), 2) if pd.notna(v) else None
+
+    last  = df.iloc[-1]
+    bb_u  = last["bb_upper"]
+    bb_l  = last["bb_lower"]
+    cur   = last["close"]
+    bb_pct = (
+        round((cur - bb_l) / (bb_u - bb_l) * 100, 1)
+        if pd.notna(bb_u) and pd.notna(bb_l) and (bb_u - bb_l) > 0
+        else None
+    )
+
+    return jsonify({
+        "sym":   sym,
+        "name":  meta.get("shortName") or meta.get("longName", ""),
+        "price": nv(cur),
+        "dates": df["date"].tolist(),
+        "ohlcv": [
+            {"x": row["date"],
+             "o": round(row["open"],  2),
+             "h": round(row["high"],  2),
+             "l": round(row["low"],   2),
+             "c": round(row["close"], 2)}
+            for _, row in df.iterrows()
+        ],
+        "volumes":   df["volume"].tolist(),
+        "ma5":       [nv(v) for v in df["ma5"]],
+        "ma20":      [nv(v) for v in df["ma20"]],
+        "ma60":      [nv(v) for v in df["ma60"]],
+        "bb_upper":  [nv(v) for v in df["bb_upper"]],
+        "bb_lower":  [nv(v) for v in df["bb_lower"]],
+        "rsi":       [nv(v) for v in df["rsi"]],
+        "chips": {
+            "ma5":      nv(last["ma5"]),
+            "ma20":     nv(last["ma20"]),
+            "ma60":     nv(last["ma60"]),
+            "rsi":      nv(last["rsi"]),
+            "bb_upper": nv(bb_u),
+            "bb_lower": nv(bb_l),
+            "bb_pct":   bb_pct,
+        },
     })
 
 

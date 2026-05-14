@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.54.0/dist/apexcharts.min.js"></script>
 <style>
 /* ─── Variables ────────────────────────────────────────────────────────── */
 :root {
@@ -644,6 +645,44 @@ button { cursor: pointer; font-family: inherit; }
   width:70px; text-align:center; outline:none;
 }
 .settings-input:focus { border-color:var(--cyan); }
+
+/* ─── K-Line Dashboard ─────────────────────────────────────────────────────── */
+.kl-tab {
+  padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  background: var(--bg3); border: 1px solid var(--border); color: var(--txt2);
+  transition: background .15s, color .15s, border-color .15s;
+}
+.kl-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.kl-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px;
+  border-radius: 20px; border: 1px solid; font-size: 12px; font-weight: 600;
+}
+.kl-box {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; border-left-width: 3px;
+}
+
+/* ─── News Panel ────────────────────────────────────────────────────────────── */
+.news-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.news-card {
+  display: flex; flex-direction: column; justify-content: space-between;
+  text-decoration: none; color: var(--txt1);
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 11px 13px; transition: border-color .15s, background .15s;
+  gap: 8px;
+}
+.news-card:hover { border-color: var(--border2); background: var(--bg3); }
+.news-title { font-size: 12px; font-weight: 500; line-height: 1.55; color: var(--txt1); }
+.news-meta  { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-shrink: 0; }
+.news-src   { font-size: 10px; color: var(--cyan); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.news-time  { font-size: 10px; color: var(--txt3); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -986,6 +1025,51 @@ button { cursor: pointer; font-family: inherit; }
     </div>
 
   </div>
+
+  <!-- K線圖儀表板 -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">K線圖儀表板</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">技術分析 · MA5/MA20/MA60 · 布林通道 · RSI · 支援台美股</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <datalist id="klSymList"></datalist>
+        <input id="klSym" class="dca-input" list="klSymList"
+               style="width:110px;text-transform:uppercase" placeholder="代號"
+               autocomplete="off" spellcheck="false"
+               onkeydown="if(event.key==='Enter')loadKline()">
+        <button class="btn btn-ghost" onclick="loadKline()" style="padding:4px 10px;font-size:11px">查詢</button>
+      </div>
+    </div>
+    <div style="padding:0 16px 16px">
+      <div style="display:flex;gap:6px;margin-bottom:14px">
+        <button class="kl-tab active" onclick="switchKlPeriod('1m',this)">1M</button>
+        <button class="kl-tab" onclick="switchKlPeriod('3m',this)">3M</button>
+        <button class="kl-tab" onclick="switchKlPeriod('6m',this)">6M</button>
+        <button class="kl-tab" onclick="switchKlPeriod('1y',this)">1Y</button>
+      </div>
+      <div id="klChips"></div>
+      <div id="klAnalysis"></div>
+      <div id="klChartArea" style="min-height:300px"></div>
+      <div id="klVolArea" style="min-height:80px;margin-top:2px"></div>
+    </div>
+  </div>
+
+  <!-- 台股最新新聞 -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">台股最新新聞</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:10px">來源：Google 新聞聚合 · 每15分鐘更新</span>
+      </div>
+      <button class="btn btn-ghost" onclick="loadTwNews()" style="padding:4px 10px;font-size:11px">重新整理</button>
+    </div>
+    <div class="panel-body" id="newsPanel">
+      <div class="sk"><div class="spin"></div></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Portfolio Form Modal -->
@@ -2705,17 +2789,255 @@ async function init() {
     const hmInput = document.getElementById('hmSym');
     if (hmInput && !hmInput.value) hmInput.value = TW_ORDER[0] || '0050';
     loadHeatmap();
+
+    // K-line dashboard datalist
+    const klList = document.getElementById('klSymList');
+    if (klList) {
+      klList.innerHTML = ORDER.map(sym =>
+        `<option value="${sym}">${sym}${cfg.names[sym] ? ' — ' + cfg.names[sym] : ''}</option>`
+      ).join('');
+    }
+    const klInput = document.getElementById('klSym');
+    if (klInput && !klInput.value) klInput.value = TW_ORDER[0] || '0050';
+    loadKline();
   } catch(e) {
     console.error('Config load failed, using fallback', e);
   }
 
   loadData();
   loadSectorRotation();
+  loadTwNews();
+}
+
+/* ─── K-Line Dashboard ────────────────────────────────────────────────────── */
+let klChart    = null;
+let klVolChart = null;
+let klPeriod   = '1m';
+
+function switchKlPeriod(p, btn) {
+  klPeriod = p;
+  document.querySelectorAll('.kl-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadKline();
+}
+
+async function loadKline() {
+  const sym = (document.getElementById('klSym').value || '').trim().toUpperCase() || '0050';
+  document.getElementById('klChips').innerHTML    = '<div style="color:var(--txt3);font-size:11px;padding:4px 0">載入中…</div>';
+  document.getElementById('klAnalysis').innerHTML = '';
+  document.getElementById('klChartArea').innerHTML = '<div style="height:300px;display:flex;align-items:center;justify-content:center;color:var(--txt3);font-size:12px">載入中…</div>';
+  document.getElementById('klVolArea').innerHTML   = '';
+
+  try {
+    const r = await fetch(`/api/kline?sym=${encodeURIComponent(sym)}&period=${klPeriod}`);
+    const d = await r.json();
+    if (!r.ok || d.error) {
+      document.getElementById('klChips').innerHTML = `<div style="color:var(--red);font-size:11px">${d.error || '查詢失敗'}</div>`;
+      document.getElementById('klChartArea').innerHTML = '';
+      return;
+    }
+    renderKline(d);
+  } catch(e) {
+    document.getElementById('klChips').innerHTML = '<div style="color:var(--red);font-size:11px">網路錯誤</div>';
+    document.getElementById('klChartArea').innerHTML = '';
+  }
+}
+
+function klMaRank(chips) {
+  const { ma5, ma20, ma60 } = chips;
+  if (ma5 == null || ma20 == null || ma60 == null) return { text: '-', color: 'var(--txt3)', desc: '' };
+  if (ma5 > ma20 && ma20 > ma60) return {
+    text: '多頭完美排列', color: 'var(--red)',
+    desc: `MA5(${ma5}) > MA20(${ma20}) > MA60(${ma60}) — 短中長期趨勢全面向上`
+  };
+  if (ma5 < ma20 && ma20 < ma60) return {
+    text: '空頭完美排列', color: 'var(--green)',
+    desc: `MA5(${ma5}) < MA20(${ma20}) < MA60(${ma60}) — 短中長期趨勢全面向下`
+  };
+  if (ma5 > ma60) return { text: '短線偏強', color: 'var(--red)',    desc: 'MA5 > MA60，短線動能較強，但均線尚未完全排列' };
+  if (ma5 < ma60) return { text: '短線偏弱', color: 'var(--green)',  desc: 'MA5 < MA60，短線動能偏弱，待均線轉強' };
+  return { text: '整理中', color: 'var(--yellow)', desc: '均線交錯，趨勢尚未明朗' };
+}
+
+function klRsiStatus(rsi) {
+  if (rsi == null) return { text: '-', color: 'var(--txt3)', desc: '' };
+  if (rsi > 80) return { text: '強烈超買', color: 'var(--red)',    desc: '動能過強，短線回調風險大' };
+  if (rsi > 70) return { text: '超買區',   color: 'var(--red)',    desc: '上漲動能趨緩，留意高點壓力' };
+  if (rsi > 60) return { text: '多頭健康', color: 'var(--yellow)', desc: '健康多頭動能區間，上漲空間仍在' };
+  if (rsi > 40) return { text: '中性整理', color: 'var(--txt2)',   desc: '多空均衡，方向待確認' };
+  if (rsi > 30) return { text: '偏弱',     color: 'var(--green)',  desc: '賣壓較大，需觀察支撐' };
+  return { text: '超賣區', color: 'var(--green)', desc: '下跌動能枯竭，留意底部反彈訊號' };
+}
+
+function klBbStatus(bb_pct) {
+  if (bb_pct == null) return { text: '-', color: 'var(--txt3)', desc: '' };
+  if (bb_pct > 90) return { text: '極強壓力',  color: 'var(--red)',    desc: '股價突破上軌，短線壓力極大' };
+  if (bb_pct > 75) return { text: '短線壓力大', color: 'var(--red)',    desc: `位於 ${bb_pct}% 位置，接近上軌 $${bb_pct}` };
+  if (bb_pct > 50) return { text: '中性偏強',   color: 'var(--yellow)', desc: `位於 ${bb_pct}% 位置，多方占優` };
+  if (bb_pct > 25) return { text: '中性偏弱',   color: 'var(--txt2)',   desc: `位於 ${bb_pct}% 位置，空方占優` };
+  return { text: '接近支撐', color: 'var(--green)', desc: `位於 ${bb_pct}% 位置，接近下軌支撐` };
+}
+
+function renderKline(d) {
+  const { chips, ohlcv, volumes, dates, ma5, ma20, ma60, bb_upper, bb_lower } = d;
+
+  // ── Chips row ──
+  document.getElementById('klChips').innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <span class="kl-chip" style="color:#f97316;border-color:#f97316;background:rgba(249,115,22,.1)">MA5: ${chips.ma5 ?? '-'}</span>
+      <span class="kl-chip" style="color:#a855f7;border-color:#a855f7;background:rgba(168,85,247,.1)">MA20: ${chips.ma20 ?? '-'}</span>
+      <span class="kl-chip" style="color:#06b6d4;border-color:#06b6d4;background:rgba(6,182,212,.1)">MA60: ${chips.ma60 ?? '-'}</span>
+      <span class="kl-chip" style="color:#84cc16;border-color:#84cc16;background:rgba(132,204,22,.1)">RSI: ${chips.rsi != null ? chips.rsi.toFixed(1) : '-'}</span>
+      <span class="kl-chip" style="color:#eab308;border-color:#eab308;background:rgba(234,179,8,.1)">BB: ${chips.bb_lower ?? '-'} ~ ${chips.bb_upper ?? '-'}</span>
+    </div>`;
+
+  // ── Analysis boxes ──
+  const maRk  = klMaRank(chips);
+  const rsiSt = klRsiStatus(chips.rsi);
+  const bbSt  = klBbStatus(chips.bb_pct);
+
+  document.getElementById('klAnalysis').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="kl-box" style="border-left-color:${maRk.color}">
+        <div style="font-size:11px;font-weight:700;color:${maRk.color};margin-bottom:6px">${maRk.text}</div>
+        <div style="font-size:10px;color:var(--txt2)">MA5 <span style="color:var(--txt1);font-weight:600">$${chips.ma5 ?? '-'}</span> &nbsp; MA20 <span style="color:var(--txt1);font-weight:600">$${chips.ma20 ?? '-'}</span></div>
+        <div style="font-size:10px;color:var(--txt2);margin-top:3px">MA60 <span style="color:var(--txt1);font-weight:600">$${chips.ma60 ?? '-'}</span></div>
+        <div style="font-size:9px;color:var(--txt3);margin-top:6px;line-height:1.5">${maRk.desc}</div>
+      </div>
+      <div class="kl-box" style="border-left-color:${rsiSt.color}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:18px;font-weight:700;color:${rsiSt.color};font-family:'JetBrains Mono',monospace">${chips.rsi != null ? chips.rsi.toFixed(1) : '-'}</span>
+          <span style="font-size:11px;font-weight:700;color:${rsiSt.color}">${rsiSt.text}</span>
+        </div>
+        <div style="font-size:9px;color:var(--txt3);line-height:1.5">${rsiSt.desc}</div>
+      </div>
+      <div class="kl-box" style="border-left-color:${bbSt.color}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:14px;font-weight:700;color:${bbSt.color}">BB ${chips.bb_pct != null ? chips.bb_pct + '%' : '-'}</span>
+          <span style="font-size:11px;font-weight:600;color:${bbSt.color}">${bbSt.text}</span>
+        </div>
+        <div style="font-size:9px;color:var(--txt2);line-height:1.6">
+          上軌 <b>$${chips.bb_upper ?? '-'}</b> &nbsp; 下軌 <b>$${chips.bb_lower ?? '-'}</b>
+        </div>
+        <div style="font-size:9px;color:var(--txt3);margin-top:3px">${bbSt.desc}</div>
+      </div>
+    </div>`;
+
+  // ── Destroy old charts ──
+  if (klChart)    { klChart.destroy();    klChart = null; }
+  if (klVolChart) { klVolChart.destroy(); klVolChart = null; }
+  document.getElementById('klChartArea').innerHTML = '';
+  document.getElementById('klVolArea').innerHTML   = '';
+
+  function paired(arr) {
+    return dates.map((dt, i) => ({ x: dt, y: arr[i] }));
+  }
+
+  // ── Candlestick + MA + BB ──
+  klChart = new ApexCharts(document.getElementById('klChartArea'), {
+    series: [
+      { name: 'K線',   type: 'candlestick', data: ohlcv },
+      { name: 'MA5',   type: 'line', data: paired(ma5) },
+      { name: 'MA20',  type: 'line', data: paired(ma20) },
+      { name: 'MA60',  type: 'line', data: paired(ma60) },
+      { name: 'BB上軌', type: 'line', data: paired(bb_upper) },
+      { name: 'BB下軌', type: 'line', data: paired(bb_lower) },
+    ],
+    chart: {
+      type: 'candlestick', height: 360,
+      background: 'transparent', toolbar: { show: false },
+      animations: { enabled: false }, foreColor: '#55657a',
+    },
+    plotOptions: {
+      candlestick: { colors: { upward: '#ef4444', downward: '#22c55e' }, wick: { useFillColor: true } },
+    },
+    colors: ['transparent', '#f97316', '#a855f7', '#06b6d4', '#eab308', '#eab308'],
+    stroke: { width: [1, 1.5, 1.5, 1.5, 1, 1], dashArray: [0, 0, 0, 0, 4, 4], curve: 'smooth' },
+    xaxis: {
+      type: 'datetime',
+      labels: { datetimeUTC: false, format: 'MM/dd', style: { colors: '#55657a', fontSize: '10px' } },
+      axisBorder: { color: '#21283a' }, axisTicks: { color: '#21283a' },
+    },
+    yaxis: {
+      opposite: true,
+      labels: { style: { colors: '#55657a', fontSize: '10px' }, formatter: v => v.toFixed(2) },
+    },
+    grid: { borderColor: 'rgba(255,255,255,.04)', strokeDashArray: 3 },
+    legend: { show: false },
+    tooltip: { theme: 'dark', shared: false },
+  });
+  klChart.render();
+
+  // ── Volume (up/down two-series stacked) ──
+  klVolChart = new ApexCharts(document.getElementById('klVolArea'), {
+    series: [
+      { name: '上漲量', data: dates.map((dt, i) => ({ x: dt, y: ohlcv[i] && ohlcv[i].c >= ohlcv[i].o ? (volumes[i] || 0) : 0 })) },
+      { name: '下跌量', data: dates.map((dt, i) => ({ x: dt, y: ohlcv[i] && ohlcv[i].c  < ohlcv[i].o ? (volumes[i] || 0) : 0 })) },
+    ],
+    chart: {
+      type: 'bar', height: 80, stacked: true,
+      background: 'transparent', toolbar: { show: false },
+      animations: { enabled: false }, foreColor: '#55657a',
+    },
+    colors: ['#ef4444', '#22c55e'],
+    plotOptions: { bar: { columnWidth: '90%' } },
+    xaxis: {
+      type: 'datetime',
+      labels: { show: false }, axisBorder: { show: false }, axisTicks: { show: false },
+    },
+    yaxis: {
+      labels: {
+        style: { colors: '#55657a', fontSize: '9px' },
+        formatter: v => v >= 1e8 ? (v/1e8).toFixed(0)+'億' : v >= 1e4 ? (v/1e4).toFixed(0)+'萬' : String(v),
+      },
+    },
+    grid: { borderColor: 'rgba(255,255,255,.04)', strokeDashArray: 3 },
+    legend: { show: false },
+    tooltip: { theme: 'dark', y: { formatter: v => v.toLocaleString() } },
+  });
+  klVolChart.render();
+}
+
+/* ─── Taiwan News ─────────────────────────────────────────────────────────── */
+function timeAgo(ts) {
+  if (!ts) return '';
+  const diff = Math.floor(Date.now() / 1000 - ts);
+  if (diff < 60)    return `${diff}秒前`;
+  if (diff < 3600)  return `${Math.floor(diff / 60)}分鐘前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}小時前`;
+  return `${Math.floor(diff / 86400)}天前`;
+}
+
+async function loadTwNews() {
+  const panel = document.getElementById('newsPanel');
+  if (!panel) return;
+  panel.innerHTML = '<div class="sk"><div class="spin"></div></div>';
+  try {
+    const r = await fetch('/api/tw-news');
+    const d = await r.json();
+    if (!r.ok || !Array.isArray(d) || d.length === 0) {
+      panel.innerHTML = '<div class="empty-box">目前無法載入新聞，請稍後再試</div>';
+      return;
+    }
+    panel.innerHTML = `<div class="news-grid">${
+      d.map(item => `
+        <a href="${item.link}" target="_blank" rel="noopener noreferrer" class="news-card">
+          <div class="news-title">${item.title}</div>
+          <div class="news-meta">
+            <span class="news-src">${item.source}</span>
+            <span class="news-time">${timeAgo(item.ts)}</span>
+          </div>
+        </a>`).join('')
+    }</div>`;
+  } catch(e) {
+    panel.innerHTML = '<div class="empty-box">網路錯誤，請稍後再試</div>';
+  }
 }
 
 init();
 setInterval(loadData, 5 * 60 * 1000);
 setInterval(loadSectorRotation, 30 * 60 * 1000);
+setInterval(loadTwNews, 15 * 60 * 1000);
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeSearchModal(); closeSettingsModal(); closePfModal(); }
 });
