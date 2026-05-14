@@ -229,25 +229,9 @@ button { cursor: pointer; font-family: inherit; }
 /* ─── Bottom row ──────────────────────────────────────────────────────── */
 .bottom-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 18px;
 }
-
-/* ─── Alert list ──────────────────────────────────────────────────────── */
-.alert-scroll { max-height: 260px; overflow-y: auto; }
-.alert-row {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 10px 18px;
-  border-bottom: 1px solid var(--border);
-}
-.alert-row:last-child { border-bottom: none; }
-.adot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
-.adot-crit { background: var(--red);   box-shadow: 0 0 6px var(--red);   }
-.adot-buy  { background: var(--green); box-shadow: 0 0 6px var(--green); }
-.adot-info { background: var(--blue);  }
-.alert-ttl { font-size: 12px; font-weight: 600; }
-.alert-msg { font-size: 10px; color: var(--txt2); margin-top: 2px; line-height: 1.4; }
-.alert-ts  { font-size: 9px;  color: var(--txt3); margin-top: 3px; font-variant-numeric: tabular-nums; }
 .empty-box { padding: 28px; text-align: center; color: var(--txt3); font-size: 11px; }
 
 /* ─── Chip panel ─────────────────────────────────────────────────────── */
@@ -804,17 +788,6 @@ button { cursor: pointer; font-family: inherit; }
   <!-- Bottom row -->
   <div class="bottom-row">
 
-    <!-- Alert history -->
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">觸發紀錄</span>
-        <span id="alertBadge" style="font-size:10px;color:var(--txt3);">無警報</span>
-      </div>
-      <div class="alert-scroll" id="alertList">
-        <div class="empty-box">目前無觸發紀錄</div>
-      </div>
-    </div>
-
     <!-- Market Sentiment -->
     <div class="panel">
       <div class="panel-header">
@@ -1028,7 +1001,7 @@ function render() {
   renderUsdTwd(state.usdtwd);
   renderGlobalMarkets(state.global_quotes);
   renderStockGrid(state.stocks);
-  renderAlerts(state.alerts, state.alert_history);
+
   renderChart(curSym);
   renderMarketSentiment(state.vix, state.foreign_net, state.fear_greed);
   renderValuation(state.taiex_pe, state.pcr);
@@ -1196,35 +1169,6 @@ function renderStockGrid(stocks) {
 
 
 
-/* ── Alert list ── */
-function renderAlerts(cur, hist) {
-  const all = [...(cur||[]), ...(hist||[])];
-  const badge = document.getElementById('alertBadge');
-
-  if (!all.length) {
-    document.getElementById('alertList').innerHTML = '<div class="empty-box">目前無觸發紀錄</div>';
-    badge.textContent = '無警報'; badge.style.color = 'var(--txt3)';
-    return;
-  }
-
-  const critCount = all.filter(a=>a.type==='CRITICAL').length;
-  badge.textContent = critCount ? `${critCount} 項警報` : `${all.length} 筆紀錄`;
-  badge.style.color = critCount ? 'var(--red)' : 'var(--yellow)';
-
-  document.getElementById('alertList').innerHTML = all.slice(0,15).map(a => {
-    const dotCls = a.type==='CRITICAL' ? 'adot-crit' : a.type==='BUY' ? 'adot-buy' : 'adot-info';
-    const ts = a.ts ? new Date(a.ts).toLocaleString('zh-TW') : '-';
-    return `
-    <div class="alert-row">
-      <div class="adot ${dotCls}"></div>
-      <div>
-        <div class="alert-ttl">[${a.code}] ${a.title}</div>
-        <div class="alert-msg">${a.msg}</div>
-        <div class="alert-ts">${ts}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
 
 /* ── Market Sentiment ── */
 function fgLabel(s) {

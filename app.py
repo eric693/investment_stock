@@ -90,23 +90,6 @@ GLOBAL_SYMBOLS = {
 _refresh_lock = threading.Lock()
 _line_users: dict = {}
 
-ALERT_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "alert_history.json")
-
-def _load_alert_history() -> list:
-    try:
-        with open(ALERT_HISTORY_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-def _save_alert_history():
-    try:
-        with open(ALERT_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(alert_history, f, ensure_ascii=False)
-    except Exception as exc:
-        logger.error("Alert history save error: %s", exc)
-
-alert_history: list = _load_alert_history()
 
 # Search cache: {ticker: {"entry": dict, "hist": DataFrame, "hist_ts": float, "price_ts": float}}
 _search_cache: dict = {}
@@ -1032,104 +1015,6 @@ def cached_data() -> dict:
 
 
 
-def check_alerts(stocks: dict, sop: dict | None) -> list[dict]:
-    if not sop:
-        return []
-    alerts  = []
-    now_str = datetime.now(TW_TZ).isoformat()
-    tw  = stocks.get("0050", {})
-    qqq = stocks.get("QQQ",  {})
-
-    pqqq  = qqq.get("pct_from_ma200") or 0.0
-    p0050 = tw.get("pct_from_ma200")  or 0.0
-    d0050 = tw.get("daily_change")    or 0.0
-    l3    = tw.get("last3_vs_ma", [])
-    rsi        = tw.get("rsi")
-    macd_cross = tw.get("macd_cross")
-    above      = tw.get("above_ma200", True)
-    div        = tw.get("divergence") or {}
-    bearish_div = div.get("bearish", False)
-    bullish_div = div.get("bullish", False)
-
-    # ── 原有 SOP 警報 ──
-    if pqqq <= -10:
-        alerts.append({"type": "CRITICAL", "code": "02", "ts": now_str,
-            "title": "雙核雷達觸發",
-            "msg": f"QQQ 跌破年線 {pqqq:.1f}%（閾值 -10%），台股正2 無條件強制清倉！"})
-
-    if len(l3) >= 3 and all(p <= -3 for p in l3):
-        alerts.append({"type": "CRITICAL", "code": "03", "ts": now_str,
-            "title": "撤退機制（連續3日）",
-            "msg": "0050 連續3天跌破年線 -3%，立刻出清正2轉備戰現金！"})
-
-    if d0050 <= -5:
-        alerts.append({"type": "CRITICAL", "code": "03", "ts": now_str,
-            "title": "撤退機制（單日暴跌）",
-            "msg": f"0050 單日跌幅 {d0050:.1f}%（閾值 -5%），立刻出清正2轉備戰現金！"})
-
-    # ── MACD 警報 ──
-    if macd_cross == "dead":
-        alerts.append({"type": "CRITICAL", "code": "03", "ts": now_str,
-            "title": "MACD 死叉預警",
-            "msg": "0050 MACD 出現死叉，動能轉弱，搭配其他訊號注意撤退時機"})
-
-    # ── 微笑佈局買點 ──
-    for lvl in sop.get("sop04", {}).get("smile_levels", []):
-        if lvl["triggered"] and abs(p0050 - lvl["threshold"]) < 0.8:
-            alerts.append({"type": "BUY", "code": "04", "ts": now_str,
-                "title": f"微笑佈局 {lvl['threshold']}% 買點",
-                "msg": f"0050 接近年線 {lvl['threshold']}% 位置（現 {p0050:.1f}%），左側佈局 5%"})
-
-    # ── RSI 超賣確認 ──
-    if rsi is not None and rsi < 30 and not above:
-        alerts.append({"type": "BUY", "code": "04", "ts": now_str,
-            "title": "RSI 超賣確認",
-            "msg": f"0050 RSI {rsi:.1f} 進入超賣區（< 30），搭配微笑佈局加碼訊號強化"})
-
-    # ── 反攻號角 ──
-    if len(l3) >= 3 and all(p >= 3 for p in l3):
-        alerts.append({"type": "BUY", "code": "05", "ts": now_str,
-            "title": "反攻號角（連續3日）",
-            "msg": "0050 連續3天站回年線+3%，底部原型 + 所有備戰現金全數壓正2！"})
-
-    if d0050 >= 5:
-        alerts.append({"type": "BUY", "code": "05", "ts": now_str,
-            "title": "反攻號角（單日大漲）",
-            "msg": f"0050 單日漲幅 {d0050:.1f}%（閾值 +5%），全數壓正2！"})
-
-    if macd_cross == "golden" and not above:
-        alerts.append({"type": "BUY", "code": "05", "ts": now_str,
-            "title": "MACD 金叉反攻訊號",
-            "msg": "0050 年線下出現 MACD 金叉，動能反轉，留意反攻號角確認"})
-
-    # ── 背離警報 ──
-    if bearish_div:
-        alerts.append({"type": "CRITICAL", "code": "DIV", "ts": now_str,
-            "title": "頂部背離警示（假突破風險）",
-            "msg": "0050 價格創新高但 RSI 未跟進，動能衰退，反攻號角暫緩加碼正2"})
-
-    if bullish_div and not above:
-        alerts.append({"type": "BUY", "code": "DIV", "ts": now_str,
-            "title": "底部背離確認（底部訊號）",
-            "msg": "0050 價格破低但 RSI 止穩，下跌動能枯竭，微笑佈局信心加強"})
-
-    # ── VIX 警報 ──
-    vix = _cache.get("vix")
-    if vix and vix.get("price", 0) > 30:
-        alerts.append({"type": "CRITICAL", "code": "VX", "ts": now_str,
-            "title": "VIX 恐慌指數偏高",
-            "msg": f"VIX {vix['price']:.1f}（> 30），市場高波動期，正2槓桿風險加倍，請謹慎操作"})
-
-    # ── 外資大幅賣超 ──
-    fn = _cache.get("foreign_net")
-    if fn and fn.get("foreign") is not None and fn["foreign"] < -5_000_000_000:
-        sold_yi = abs(fn["foreign"]) / 1e8
-        alerts.append({"type": "CRITICAL", "code": "FN", "ts": now_str,
-            "title": "外資大幅賣超",
-            "msg": f"外資今日賣超約 {sold_yi:.0f} 億元，搭配年線訊號判斷是否撤退"})
-
-    return alerts
-
 
 # ─── Notification ─────────────────────────────────────────────────────────────
 def _send_notification_sync(message: str):
@@ -1164,27 +1049,9 @@ def index():
 def api_dashboard():
     try:
         stocks = cached_data()
-        alerts = check_alerts(stocks, None)
-
-        new_alerts = False
-        for a in alerts:
-            # Deduplicate by code+title (ignore ts which changes every call)
-            is_dup = any(
-                h.get("code") == a.get("code") and h.get("title") == a.get("title")
-                for h in alert_history
-            )
-            if not is_dup:
-                alert_history.insert(0, a)
-                new_alerts = True
-        while len(alert_history) > 50:
-            alert_history.pop()
-        if new_alerts:
-            _save_alert_history()
 
         return jsonify({
             "stocks":        stocks,
-            "alerts":        alerts,
-            "alert_history": alert_history[:20],
             "updated_at":    datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S"),
             "price_age":     int(time.time() - _cache["price_ts"]) if _cache["price_ts"] > 0 else None,
             "hist_age":      int(time.time() - _cache["hist_ts"])  if _cache["hist_ts"]  > 0 else None,
