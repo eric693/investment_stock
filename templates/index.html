@@ -664,8 +664,21 @@ button { cursor: pointer; font-family: inherit; }
   <!-- Chart -->
   <div class="panel" style="display:flex;flex-direction:column">
       <div class="panel-header" style="flex-direction:column;align-items:stretch;gap:10px">
-        <span class="panel-title">收盤價 &amp; 移動平均線</span>
-        <div class="chart-tabs" id="chartTabs"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <span class="panel-title">收盤價 &amp; 移動平均線</span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <datalist id="chartSymList"></datalist>
+            <input id="chartSearchSym" class="dca-input" list="chartSymList"
+                   style="width:110px;text-transform:uppercase" placeholder="代號搜尋"
+                   autocomplete="off" spellcheck="false"
+                   onkeydown="if(event.key==='Enter')searchChart()">
+            <button class="btn btn-ghost" onclick="searchChart()" style="padding:4px 10px;font-size:11px">查詢</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div class="chart-tabs" id="chartTabs"></div>
+          <span id="chartSearchStatus" style="font-size:10px;color:var(--cyan);font-weight:600;white-space:nowrap"></span>
+        </div>
       </div>
       <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
       <div class="chart-legend">
@@ -1408,6 +1421,8 @@ function renderSearchResult(s) {
 }
 
 /* ── Chart ── */
+const _searchChartCache = {};
+
 function switchChart(btn, sym) {
   curSym = sym;
   document.querySelectorAll('.ctab').forEach(b => b.classList.remove('active'));
@@ -1415,8 +1430,30 @@ function switchChart(btn, sym) {
   renderChart(sym);
 }
 
+async function searchChart() {
+  const raw = (document.getElementById('chartSearchSym').value || '').trim().toUpperCase();
+  if (!raw) return;
+  const statusEl = document.getElementById('chartSearchStatus');
+  if (statusEl) statusEl.textContent = '載入中…';
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(raw)}`);
+    const d = await r.json();
+    if (d.error) { toast(d.error, false); if (statusEl) statusEl.textContent = ''; return; }
+    _searchChartCache[raw] = { chart: d.chart, name: d.name };
+    curSym = raw;
+    document.querySelectorAll('.ctab').forEach(b => b.classList.remove('active'));
+    renderChart(raw);
+    if (statusEl) statusEl.textContent = d.name || raw;
+  } catch(e) {
+    toast('查詢失敗，請確認代號', false);
+    if (statusEl) statusEl.textContent = '';
+  }
+}
+
 function renderChart(sym) {
-  const s = state?.stocks?.[sym]; if (!s?.chart) return;
+  const cached = _searchChartCache[sym];
+  const s = cached ? { chart: cached.chart } : state?.stocks?.[sym];
+  if (!s?.chart) return;
   const c = s.chart;
 
   const ctx = document.getElementById('priceChart').getContext('2d');
@@ -2177,6 +2214,14 @@ async function init() {
     pfSel.innerHTML = ORDER.map(sym =>
       `<option value="${sym}">${sym}${cfg.names[sym] ? ' — ' + cfg.names[sym] : ''}</option>`
     ).join('');
+
+    // Build chart search datalist
+    const chartSymList = document.getElementById('chartSymList');
+    if (chartSymList) {
+      chartSymList.innerHTML = ORDER.map(sym =>
+        `<option value="${sym}">${sym}${cfg.names[sym] ? ' — ' + cfg.names[sym] : ''}</option>`
+      ).join('');
+    }
 
     // Build heatmap datalist and set default
     const hmList = document.getElementById('hmSymList');
